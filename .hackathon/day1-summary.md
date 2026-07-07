@@ -29,6 +29,17 @@ insecure* — the governed path must beat shadow IT (rogue AD / free dev tenants
 - **Demo hero moment:** live hub → spoke SSO into a freshly-claimed, federated org, no new password.
 - **Aerial:** central-admin governance plane — architecture/roadmap, **out of the demo tracer bullet**.
 
+### Deep-dive decisions resolved (post-wrap spec hardening)
+- **Federation:** SAML Org2Org, **hub-as-IdP**, users live in the hub and SSO *down* into the
+  spoke (JIT-provisioned). Reuses `modules/saml-federation`.
+- **Template model:** central-security-owned **required section (TF-enforced on every apply)**
+  + **deterministic, enumerated GUI knobs (no free text)** so a requester can't configure into
+  a trap. Exact required controls are customer-defined.
+- **Pool lifecycle:** low-water-mark refill; **claimed orgs are single-use** (never re-blanked);
+  governed teardown = **revoke federation → archive 90d (configurable up to 1y) → destroy**.
+- **Agentic path:** expert assistant that keeps humans out of the loop; **on-behalf-of via Okta
+  agent identity + Cross App Access**, MCP bridge where useful, HITL approval before apply.
+
 ## Head start: existing repo to reuse
 
 Most of the Terraform provisioning back end already exists in
