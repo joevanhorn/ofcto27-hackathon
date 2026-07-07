@@ -81,8 +81,12 @@ the estate.
 - **Portal authorization:** gated by membership of the hub group `Division Leads`.
 - **Ownership model:** the requester is programmatically scoped as owner/admin of only their
   new spoke; no hub or cross-spoke privileges are ever granted.
-- **Federation:** each spoke is configured to federate to the hub at provisioning time
-  (hub-and-spoke), enabling hub → spoke SSO.
+- **Federation:** **SAML Org2Org with the hub as IdP.** Each spoke is configured as an SP at
+  provisioning time; users live in the hub and SSO *down* into their spoke, JIT-provisioned
+  on first sign-in. Chosen for a single directory of record (one place to enforce MFA,
+  deprovisioning, and audit) and because it is already proven in the reusable
+  `modules/saml-federation` (hub IdP mode / spoke SP mode, config auto-exchanged via
+  `terraform_remote_state`). Spokes never own their own user population.
 - **Plan transparency:** the Terraform plan is translated into plain language and shown to
   the requester for approval before apply.
 - **Dual entry points:** the same provisioning action is exposed through both the GUI and an
@@ -110,7 +114,8 @@ the estate.
 - **Demo hero moment:** live SSO from the hub into a freshly-claimed, auto-federated spoke —
   no new password. The request → plain-language plan → approve flow is the supporting
   evidence; the seamless federated sign-in is the climax.
+- **Resolved decisions log:** federation mechanism resolved to **SAML Org2Org, hub-as-IdP,
+  users-in-hub SSO-down** (see Implementation Decisions).
 - **Open questions carried from `docs/solution.md`:** Aerial automation/API surface for
-  auto-onboarding spokes; exact contents of the baseline security template; federation
-  mechanism (Org2Org / SAML / OIDC) and its Terraform coverage against pool orgs; pool
-  refill and deprovision lifecycle; agentic-path on-behalf-of authorization.
+  auto-onboarding spokes; exact contents of the baseline security template; pool refill and
+  deprovision lifecycle; agentic-path on-behalf-of authorization.

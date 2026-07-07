@@ -7,3 +7,6 @@ B) Also agreed. We would ahev a group for "Division Leads" that would be the aut
 Let's also consider if there's any value to Okta Aerial as an additon for the central admins https://help.okta.com/aerial/en-us/content/topics/aerial/overview.htm
 [2026-07-07 17:38:19] Looks good. Proceed
 [2026-07-07 17:41:55] go ahead and wrap-day for now. I think that's all I'm supposed to do today
+[2026-07-07 19:02:11] Let's work through them
+
+1. Lock Saml Org2Org as it's proven in my existing components. Users will live in the hub and SSO down to the spoke. That's the cleanest option from a security compliance standpoint

@@ -33,8 +33,9 @@ management expressed as self-service:
   **`Division Leads`**. No group, no portal.
 - **Least-privilege ownership:** the requester is auto-assigned as owner/admin of **only
   their new spoke** — never the hub, never anyone else's spoke.
-- **Federation:** every spoke is born already federated to the hub (hub-and-spoke),
-  so users authenticate once at the hub and SSO into their spoke.
+- **Federation:** every spoke is born already federated to the hub via **SAML Org2Org with
+  the hub as IdP**, so users live in the hub, authenticate once there, and SSO *down* into
+  their spoke — one directory of record, one place to enforce MFA and deprovisioning.
 - **Central governance (Okta Aerial):** the hub team manages the fleet of spokes through
   Okta Aerial — single-pane inventory of every spoke plus **time-bound, requestable**
   access into any managed org, so central admins hold *no standing super-admin* across the
@@ -96,7 +97,10 @@ least-privilege ownership and hub federation baked in from birth.
   preview, and "My Orgs" dashboard.
 - **Agentic entry point:** the same provisioning action exposed to an agent/assistant so a
   spoke can be requested conversationally, not only through the GUI.
-- **Federation:** hub-and-spoke — spoke org configured to federate to the hub at creation.
+- **Federation:** **SAML Org2Org, hub-as-IdP** — the hub is the SAML IdP; each spoke is
+  configured as an SP at provisioning time; users live in the hub and SSO *down* into their
+  spoke (JIT-provisioned in the spoke on first sign-in). Reuses `modules/saml-federation`
+  (hub IdP mode / spoke SP mode, config auto-exchanged via `terraform_remote_state`).
 - **Central governance:** Okta Aerial for fleet inventory + JIT time-bound admin access
   (target architecture).
 
@@ -107,8 +111,6 @@ least-privilege ownership and hub federation baked in from birth.
   console-only? (Determines whether the loop to central governance can be fully automated.)
 - **Template model:** how many baseline templates for the demo, and what exactly does the
   "baseline security" template enforce (MFA policy, admin roles, password policy, sign-on)?
-- **Federation direction & type:** Org2Org / SAML / OIDC federation between hub and spoke —
-  which mechanism, and is it fully Terraform-able against the pool orgs available?
 - **Pool exhaustion & lifecycle:** how is the pool refilled, and what happens on
   deprovision (does a claimed org return to the pool)?
 - **Agentic path auth:** how does the agent authenticate and carry the Division Lead's
