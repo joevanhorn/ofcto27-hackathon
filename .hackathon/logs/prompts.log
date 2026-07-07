@@ -1,0 +1,9 @@
+[2026-07-07 17:22:41] We're going to build a portal with terraform on the back-end that allows for Okta tenant creation and management through a GUI for users with needs to own and manage an Okta Org, but who don't have the technical or Okta specific skills to execute on that easily. Each org would be built off of a defined template and automatically federate with a central Okta org, to create a hub and spoke architecture where new spokes can be spun up throgh the gui or via agentic assistant
+[2026-07-07 17:26:15] That's the right actor. The pain we're trying to solve is also for central security and identity teams who want to avoid users going down shadow IT paths or spinning up AD instances instead. So the product has to be easier than the "wrong" way to incentivise use. Good security is easier for the end user than being insecure.
+[2026-07-07 17:29:48] I like the flow. On the back-end we'll have a couple blank Okta orgs ready to go which will simulate the new Org creation and may be part of the true final solution
+[2026-07-07 17:34:02] A) Agreed
+B) Also agreed. We would ahev a group for "Division Leads" that would be the authorized users of the portal.
+
+Let's also consider if there's any value to Okta Aerial as an additon for the central admins https://help.okta.com/aerial/en-us/content/topics/aerial/overview.htm
+[2026-07-07 17:38:19] Looks good. Proceed
+[2026-07-07 17:41:55] go ahead and wrap-day for now. I think that's all I'm supposed to do today
