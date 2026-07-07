@@ -54,6 +54,10 @@ the estate.
 ### Division Lead — agentic path
 13. As a Division Lead, I want to request a spoke conversationally through an agent/assistant, so that I can provision an org without navigating a GUI.
 14. As a Division Lead, I want the agentic path to enforce the same authorization and guardrails as the GUI, so that convenience never weakens security.
+14a. As a Division Lead who is not an Okta expert, I want the agent to explain options and guide me all the way to a completed request, so that I don't have to escalate to a human team.
+14b. As a central identity admin, I want the agent to hold no standing provisioning power and instead act on-behalf-of the authenticated user via Okta Cross App Access, so that talking to the agent can never bypass the `Division Leads` gate.
+14c. As a central identity admin, I want the agent to have its own first-class Okta agent identity so every action is attributable as "agent acting for user Y", so that agent activity is fully auditable.
+14d. As a central identity admin, I want the agent to keep a human-in-the-loop approval before any apply, so that the agent proposes but an authorized human commits.
 
 ### Central Security / Identity admin
 15. As a central identity admin, I want only members of `Division Leads` to be able to request orgs, so that provisioning stays authorized and auditable.
@@ -113,6 +117,15 @@ the estate.
   **destroy** at window end unless reactivated.
 - **Plan transparency:** the Terraform plan is translated into plain language and shown to
   the requester for approval before apply.
+- **Agentic path (on-behalf-of, expert self-service):** the agent is an **expert assistant**
+  whose purpose is to make a non-expert requester self-sufficient so the central human team is
+  not pulled back in (the value collapses if users still need human help). It holds **no
+  standing provisioning power**: the Division Lead authenticates with their hub identity and
+  the agent acts **on behalf of that user** via Okta's **AI agent-security + Cross App Access
+  (XAA)**, so Okta evaluates the *same* `Division Leads` gate as the GUI. The agent is a
+  **first-class Okta agent identity** (actions attributable as "agent acting for user Y"),
+  exposes provisioning over an **MCP bridge** where useful, and always keeps a
+  **human-in-the-loop approval** before apply.
 - **Dual entry points:** the same provisioning action is exposed through both the GUI and an
   agentic assistant; the agentic path must carry the requester's authorization so identical
   guardrails apply.
@@ -142,6 +155,8 @@ the estate.
   SSO-down**; (2) template model → **central-owned required section (TF-enforced on every
   apply) + deterministic enumerated GUI knobs, no free text**; (3) pool lifecycle →
   **low-water-mark refill; single-use claimed orgs; governed teardown = revoke federation →
-  archive 90d (up to 1y) → destroy** (see Implementation Decisions).
+  archive 90d (up to 1y) → destroy**; (4) agentic path → **on-behalf-of via Okta agent
+  identity + Cross App Access, MCP bridge, HITL approval; an expert agent whose job is to keep
+  humans out of the loop** (see Implementation Decisions).
 - **Open questions carried from `docs/solution.md`:** Aerial automation/API surface for
-  auto-onboarding spokes; agentic-path on-behalf-of authorization.
+  auto-onboarding spokes; exact XAA / agent-security feature coverage needs a validation spike.

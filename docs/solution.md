@@ -115,8 +115,25 @@ least-privilege ownership and hub federation baked in from birth.
   365 days), consistent with the no-free-text knob rule.
 - **Frontend:** a GUI portal (Okta OIDC-protected) with request form, plain-language plan
   preview, and "My Orgs" dashboard.
-- **Agentic entry point:** the same provisioning action exposed to an agent/assistant so a
-  spoke can be requested conversationally, not only through the GUI.
+- **Agentic entry point — an expert assistant, not just an alt UI:** the goal is a
+  conversational agent that can *walk a non-expert Division Lead all the way through*
+  provisioning so the central human team is not pulled back in. The value proposition
+  collapses if users still need human help — so the agent must be genuinely self-sufficient
+  (explains options, recommends templates, resolves confusion, completes the request).
+  - **Authorization (on-behalf-of, no standing power):** the agent holds **no standing
+    provisioning rights**. The Division Lead authenticates with their hub Okta identity; the
+    agent then acts **on behalf of that user** via Okta's **AI agent-security + Cross App
+    Access (XAA)** capabilities, so the *same* `Division Leads` group gate the GUI enforces is
+    evaluated by Okta — not re-implemented in the agent. Auth/authz stay in Okta; the agent is
+    just another gated client of the same provisioning action.
+  - **Agent identity & attribution:** the agent is a **first-class Okta agent identity**, so
+    every action is attributable as "agent acting for user Y," never anonymous and never a
+    shared admin credential.
+  - **Tool surface:** provisioning actions are exposed to the agent over an **MCP bridge**
+    where that simplifies wiring the agent to the Terraform/pool-claim backend.
+  - **Human-in-the-loop preserved:** the agent proposes and explains the plain-language plan;
+    the authorized human still gives explicit approval before apply. The agent proposes, the
+    authorized human commits.
 - **Federation:** **SAML Org2Org, hub-as-IdP** — the hub is the SAML IdP; each spoke is
   configured as an SP at provisioning time; users live in the hub and SSO *down* into their
   spoke (JIT-provisioned in the spoke on first sign-in). Reuses `modules/saml-federation`
@@ -133,5 +150,6 @@ least-privilege ownership and hub federation baked in from birth.
   controls are defined by each customer's central security team, so the tool ships the
   two-part model (required + deterministic knobs) rather than a fixed control list. For the
   demo we will pick one concrete hardened required set to make the story provable.
-- **Agentic path auth:** how does the agent authenticate and carry the Division Lead's
-  authorization (on-behalf-of) so the same guardrails apply as the GUI?
+- **XAA / agent-identity maturity:** validate how far Okta's Cross App Access + agent-security
+  features can carry the on-behalf-of provisioning flow today, and where the MCP bridge needs
+  to fill gaps — the *model* is decided; the exact API/feature coverage needs a spike.
