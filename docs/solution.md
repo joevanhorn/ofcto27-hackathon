@@ -103,7 +103,16 @@ least-privilege ownership and hub federation baked in from birth.
     text**. The constrained option set is designed so a requester *cannot configure the org
     into an insecure or broken state* — every selectable combination is a valid, compliant
     one. Guardrails are in the shape of the choices, not in after-the-fact review.
-- **Org supply:** pre-warmed pool of blank Okta orgs, claimed atomically on request.
+- **Org supply & lifecycle:** pre-warmed pool of blank Okta orgs, claimed atomically on
+  request. The pool is a managed resource with a **low-water mark** — when claimable blanks
+  fall below a threshold, central automation replenishes (pre-creates + baseline-configures
+  new blanks) so a requester never waits. **Claimed orgs are single-use — never re-blanked or
+  returned to the pool** (re-blanking risks identity/data bleed between two different owners).
+  **Teardown is governed:** revoke hub↔spoke federation *first* (cut SSO immediately), remove
+  the owner's admin scoping, then **archive the org for a retention window (default 90 days,
+  configurable up to 1 year)** — recoverable if reactivation is needed — and **destroy** at
+  window end. The retention window is a **deterministic enumerated choice** (e.g. 90 / 180 /
+  365 days), consistent with the no-free-text knob rule.
 - **Frontend:** a GUI portal (Okta OIDC-protected) with request form, plain-language plan
   preview, and "My Orgs" dashboard.
 - **Agentic entry point:** the same provisioning action exposed to an agent/assistant so a
@@ -124,7 +133,5 @@ least-privilege ownership and hub federation baked in from birth.
   controls are defined by each customer's central security team, so the tool ships the
   two-part model (required + deterministic knobs) rather than a fixed control list. For the
   demo we will pick one concrete hardened required set to make the story provable.
-- **Pool exhaustion & lifecycle:** how is the pool refilled, and what happens on
-  deprovision (does a claimed org return to the pool)?
 - **Agentic path auth:** how does the agent authenticate and carry the Division Lead's
   authorization (on-behalf-of) so the same guardrails apply as the GUI?

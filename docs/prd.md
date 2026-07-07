@@ -68,6 +68,10 @@ the estate.
 
 ### Platform / system
 21. As the platform, I want to claim orgs atomically from a pre-warmed pool of blank orgs, so that provisioning appears instant and org-birth latency is hidden.
+21a. As the platform, I want to replenish the blank-org pool on a low-water mark, so that a requester never waits for an org even under bursty demand.
+21b. As the platform, I want claimed orgs to be single-use (never re-blanked or returned to the pool), so that no identity or data can bleed between two different business owners.
+21c. As a central identity admin, I want retiring a spoke to revoke its hub federation before anything else, so that the SSO path is cut the moment an org is decommissioned.
+21d. As a Division Lead, I want a retired spoke archived for a configurable window (default 90 days, up to 1 year) before destruction, so that I can reactivate it if it turns out to still be needed.
 22. As the platform, I want all spoke configuration driven by reusable Terraform templates, so that every org is provisioned consistently and reproducibly.
 23. As the platform, I want to surface the Terraform plan as plain language to the user, so that a non-technical requester can understand and approve it.
 
@@ -99,6 +103,14 @@ the estate.
   combination a requester can pick produces an insecure or broken org; guardrails live in the
   shape of the choices, not in after-the-fact review. Exact required-section controls are
   customer-defined (owned by their central team), not prescribed by the tool.
+- **Pool refill & governed teardown:** the blank-org pool is replenished on a **low-water
+  mark** (central automation pre-creates + baseline-configures new blanks below a threshold),
+  so requesters never wait. **Claimed orgs are single-use** — never re-blanked or returned to
+  the pool (re-blanking risks identity/data bleed between different owners). Retiring a spoke
+  runs a **governed teardown**: revoke hub↔spoke federation first (SSO cut immediately),
+  remove the owner's admin scoping, **archive** the org for a retention window
+  (**default 90 days, configurable up to 1 year** as a deterministic enumerated choice), then
+  **destroy** at window end unless reactivated.
 - **Plan transparency:** the Terraform plan is translated into plain language and shown to
   the requester for approval before apply.
 - **Dual entry points:** the same provisioning action is exposed through both the GUI and an
@@ -128,7 +140,8 @@ the estate.
   evidence; the seamless federated sign-in is the climax.
 - **Resolved decisions log:** (1) federation → **SAML Org2Org, hub-as-IdP, users-in-hub
   SSO-down**; (2) template model → **central-owned required section (TF-enforced on every
-  apply) + deterministic enumerated GUI knobs, no free text** (see Implementation Decisions).
+  apply) + deterministic enumerated GUI knobs, no free text**; (3) pool lifecycle →
+  **low-water-mark refill; single-use claimed orgs; governed teardown = revoke federation →
+  archive 90d (up to 1y) → destroy** (see Implementation Decisions).
 - **Open questions carried from `docs/solution.md`:** Aerial automation/API surface for
-  auto-onboarding spokes; pool refill and deprovision lifecycle; agentic-path on-behalf-of
-  authorization.
+  auto-onboarding spokes; agentic-path on-behalf-of authorization.
