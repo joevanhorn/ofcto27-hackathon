@@ -83,6 +83,11 @@ least-privilege ownership and hub federation baked in from birth.
 
 ## Technical approach
 
+> **Reuse:** most of the provisioning back end already exists in
+> `joevanhorn/okta-terraform-demo-template` — see [`docs/building-blocks.md`](building-blocks.md)
+> for the reuse map (federation, per-org environment pattern, S3 state backend, template
+> generation, agentic generator) versus the net-new portal + pool-claim work.
+
 - **Backend:** Terraform (Okta provider + `oktapam`/related) as the provisioning engine;
   spoke config driven by reusable **templates** (baseline security policy, federation, group
   and admin-role scoping).

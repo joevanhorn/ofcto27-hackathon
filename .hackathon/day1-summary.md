@@ -29,6 +29,17 @@ insecure* — the governed path must beat shadow IT (rogue AD / free dev tenants
 - **Demo hero moment:** live hub → spoke SSO into a freshly-claimed, federated org, no new password.
 - **Aerial:** central-admin governance plane — architecture/roadmap, **out of the demo tracer bullet**.
 
+## Head start: existing repo to reuse
+
+Most of the Terraform provisioning back end already exists in
+`joevanhorn/okta-terraform-demo-template`. Full reuse map in `docs/building-blocks.md`.
+Load-bearing reuse: `modules/saml-federation` (hub-and-spoke Okta→Okta federation, done),
+the `environments/<org>/` one-folder-per-tenant pattern, `aws-backend/` (per-spoke S3 state),
+`demo-builder/` (template-driven generation), `ai-assisted/` (NL→Terraform, seeds the agentic
+path). Net-new = the portal GUI + pool-claim orchestration + `Division Leads` authz + Aerial.
+The reuse map already suggests the Day-2 agent seams (provisioning / Okta-specialist /
+frontend / orchestration).
+
 ## Natural seams for Day 2 (multi-agent decomposition candidates)
 
 These emerged as the independent lanes of the build — useful raw material for `/design-agents`:
