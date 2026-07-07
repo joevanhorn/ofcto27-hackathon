@@ -90,8 +90,19 @@ least-privilege ownership and hub federation baked in from birth.
 > generation, agentic generator) versus the net-new portal + pool-claim work.
 
 - **Backend:** Terraform (Okta provider + `oktapam`/related) as the provisioning engine;
-  spoke config driven by reusable **templates** (baseline security policy, federation, group
-  and admin-role scoping).
+  spoke config driven by reusable **templates**. Terraform is not just the provisioner but
+  the **compliance enforcer** — every apply (re)asserts the required baseline, so downstream
+  orgs cannot drift out of compliance.
+- **Template model (two-part, central-governed):**
+  - **Required section** — owned and defined by the **central security & identity team**, not
+    by the tool and not by the requester. Locked into the template and enforced on every TF
+    apply (e.g. phishing-resistant MFA, federation-only human sign-in, scoped admin roles,
+    break-glass admin). This is what guarantees "secure by birth."
+  - **Optional section (the GUI knobs)** — everything a Division Lead may choose is exposed
+    as **deterministic, enumerated choices** (dropdowns / toggles / pick-lists), **never free
+    text**. The constrained option set is designed so a requester *cannot configure the org
+    into an insecure or broken state* — every selectable combination is a valid, compliant
+    one. Guardrails are in the shape of the choices, not in after-the-fact review.
 - **Org supply:** pre-warmed pool of blank Okta orgs, claimed atomically on request.
 - **Frontend:** a GUI portal (Okta OIDC-protected) with request form, plain-language plan
   preview, and "My Orgs" dashboard.
@@ -109,8 +120,10 @@ least-privilege ownership and hub federation baked in from birth.
 - **Aerial automation surface:** does Aerial expose an API / Terraform coverage to
   auto-onboard each newly claimed spoke into its managed-org inventory, or is onboarding
   console-only? (Determines whether the loop to central governance can be fully automated.)
-- **Template model:** how many baseline templates for the demo, and what exactly does the
-  "baseline security" template enforce (MFA policy, admin roles, password policy, sign-on)?
+- **Template contents (customer-defined, not blocking):** the *exact* required-section
+  controls are defined by each customer's central security team, so the tool ships the
+  two-part model (required + deterministic knobs) rather than a fixed control list. For the
+  demo we will pick one concrete hardened required set to make the story provable.
 - **Pool exhaustion & lifecycle:** how is the pool refilled, and what happens on
   deprovision (does a claimed org return to the pool)?
 - **Agentic path auth:** how does the agent authenticate and carry the Division Lead's

@@ -41,6 +41,7 @@ the estate.
 4. As a Division Lead, I want to request a new spoke org by naming it and picking a template, so that I don't need Okta expertise to get a correctly-configured org.
 5. As a Division Lead, I want to specify the owner email for the new org, so that ownership is explicit from the start.
 6. As a Division Lead, I want to choose from predefined templates (e.g. "Sales Demo Org", "Partner Portal"), so that the org comes pre-configured for my use case.
+6a. As a Division Lead, I want the options I can set to be presented as deterministic choices (dropdowns/toggles), not free-text fields, so that I cannot accidentally configure my org into an insecure or broken state.
 7. As a Division Lead, I want to see a plain-language preview of exactly what will be created and changed before I commit, so that I understand and trust what the portal is about to do.
 8. As a Division Lead, I want provisioning to feel near-instant, so that the governed path is faster than standing up shadow IT.
 
@@ -57,6 +58,9 @@ the estate.
 ### Central Security / Identity admin
 15. As a central identity admin, I want only members of `Division Leads` to be able to request orgs, so that provisioning stays authorized and auditable.
 16. As a central identity admin, I want every spoke to be born with a baseline security template applied, so that no org is ever created insecure.
+16a. As a central identity admin, I want to own and define the required section of each template, so that compliance requirements are set centrally rather than by the requester.
+16b. As a central identity admin, I want Terraform to re-enforce the required baseline on every apply, so that downstream orgs cannot drift out of compliance over time.
+16c. As a central identity admin, I want the requester's optional choices restricted to a deterministic, enumerated set, so that no selectable combination can produce a non-compliant org.
 17. As a central identity admin, I want requesters to never receive hub or cross-spoke privileges, so that blast radius is minimized by design.
 18. As a central identity admin, I want a single-pane inventory of every spoke (via Aerial), so that I always know what exists across the estate.
 19. As a central identity admin, I want time-bound, requestable access into any managed spoke (via Aerial), so that I don't hold standing super-admin across every org.
@@ -87,6 +91,14 @@ the estate.
   deprovisioning, and audit) and because it is already proven in the reusable
   `modules/saml-federation` (hub IdP mode / spoke SP mode, config auto-exchanged via
   `terraform_remote_state`). Spokes never own their own user population.
+- **Template model (two-part, central-governed):** each template has a **required section**
+  owned by the central security & identity team — locked, not editable by the tool or the
+  requester, and **re-enforced on every Terraform apply** so downstream orgs cannot drift out
+  of compliance — plus an **optional section** exposed in the GUI as **deterministic,
+  enumerated choices only (no free text)**. The selectable option set is constrained so no
+  combination a requester can pick produces an insecure or broken org; guardrails live in the
+  shape of the choices, not in after-the-fact review. Exact required-section controls are
+  customer-defined (owned by their central team), not prescribed by the tool.
 - **Plan transparency:** the Terraform plan is translated into plain language and shown to
   the requester for approval before apply.
 - **Dual entry points:** the same provisioning action is exposed through both the GUI and an
@@ -114,8 +126,9 @@ the estate.
 - **Demo hero moment:** live SSO from the hub into a freshly-claimed, auto-federated spoke —
   no new password. The request → plain-language plan → approve flow is the supporting
   evidence; the seamless federated sign-in is the climax.
-- **Resolved decisions log:** federation mechanism resolved to **SAML Org2Org, hub-as-IdP,
-  users-in-hub SSO-down** (see Implementation Decisions).
+- **Resolved decisions log:** (1) federation → **SAML Org2Org, hub-as-IdP, users-in-hub
+  SSO-down**; (2) template model → **central-owned required section (TF-enforced on every
+  apply) + deterministic enumerated GUI knobs, no free text** (see Implementation Decisions).
 - **Open questions carried from `docs/solution.md`:** Aerial automation/API surface for
-  auto-onboarding spokes; exact contents of the baseline security template; pool refill and
-  deprovision lifecycle; agentic-path on-behalf-of authorization.
+  auto-onboarding spokes; pool refill and deprovision lifecycle; agentic-path on-behalf-of
+  authorization.

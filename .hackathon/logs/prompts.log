@@ -10,3 +10,4 @@ Let's also consider if there's any value to Okta Aerial as an additon for the ce
 [2026-07-07 19:02:11] Let's work through them
 
 1. Lock Saml Org2Org as it's proven in my existing components. Users will live in the hub and SSO down to the spoke. That's the cleanest option from a security compliance standpoint
+[2026-07-07 19:14:37] For this question, this is something the end customer would define. The template would be owned by the centra security and identity teams, and then be leveraged via the tool to ensure downstream orgs are compliant, and terraform will enforce those requirements via the TF applies. Items outside the "required" section, would be the knobs the end users can select from within the GUI. However, let's avoid free text as much as possible and focus on deterministic choices, so users can't customize themselves into a trap
