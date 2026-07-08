@@ -1,0 +1,110 @@
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.2"></circle>
+        <circle cx="4.5" cy="5" r="1.8"></circle>
+        <circle cx="19.5" cy="5" r="1.8"></circle>
+        <circle cx="4.5" cy="19" r="1.8"></circle>
+        <circle cx="19.5" cy="19" r="1.8"></circle>
+        <path d="M6 6.2 10 10M18 6.2 14 10M6 17.8 10 14M18 17.8 14 14"></path>
+      </svg>
+    </span>
+    <div class="brand-text">
+      <h1>Spoke Provisioning Portal</h1>
+      <p class="tagline">Governed self-service &mdash; hub-and-spoke Okta org provisioning</p>
+    </div>
+  </div>
+
+  <div class="identity">
+    <div class="identity-label">Demo identity &mdash; simulates Okta OIDC login at the hub</div>
+    <div id="identity-controls" class="identity-controls">
+      <!-- populated by app.js -->
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- LEFT: request a spoke -->
+  <section class="card" id="request-card">
+    <div class="card-head">
+      <h2><span class="step-num">1</span> Request a spoke</h2>
+      <p class="card-sub">Every option is a closed choice &mdash; no free-text, so no misconfiguration.</p>
+    </div>
+
+    <div id="signed-out-notice" class="notice notice-muted">
+      <span class="notice-icon" aria-hidden="true">&#128274;</span>
+      <span>Sign in as a demo identity above to request a spoke org.</span>
+    </div>
+
+    <form id="request-form" class="form" hidden>
+      <label class="field">
+        <span class="field-label">Organization name</span>
+        <input type="text" id="org-name" name="org-name" placeholder="e.g. Northeast Sales Division" autocomplete="off" required />
+      </label>
+
+      <label class="field">
+        <span class="field-label">Template baseline</span>
+        <select id="template-select" name="template"></select>
+      </label>
+
+      <p id="template-desc" class="template-desc"></p>
+
+      <div class="field">
+        <span class="field-label">Enforced by central security</span>
+        <div id="controls-chips" class="chips" aria-live="polite"></div>
+      </div>
+
+      <div id="options-fields" class="options-grid"></div>
+
+      <div class="actions">
+        <button type="button" id="preview-btn" class="btn btn-secondary">Preview plan</button>
+        <button type="button" id="provision-btn" class="btn btn-primary" hidden>
+          <span class="btn-label">Provision spoke</span>
+        </button>
+      </div>
+    </form>
+
+    <!-- Guardrail block (403) -->
+    <div id="guardrail-banner" class="banner banner-block" hidden>
+      <span class="banner-icon" aria-hidden="true">&#128737;</span>
+      <div class="banner-body">
+        <strong>Blocked by the governance guardrail</strong>
+        <p>You're not in the <em>Division Leads</em> group, so you can't provision an org. This is the guardrail that keeps the governed path safe &mdash; enforced server-side, not just hidden in the UI.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: plan preview + result + my orgs -->
+  <div class="side-column">
+    <section class="card" id="plan-card" hidden>
+      <div class="card-head">
+        <h2><span class="step-num">2</span> Plan preview</h2>
+        <p class="card-sub">Exactly what will happen before anything is committed.</p>
+      </div>
+      <ol id="plan-list" class="plan-list"></ol>
+    </section>
+
+    <section class="card card-success" id="result-card" hidden>
+      <div class="card-head">
+        <h2><span class="success-check" aria-hidden="true">&#10003;</span> Spoke provisioned</h2>
+        <p class="card-sub" id="result-sub"></p>
+      </div>
+      <ol id="result-plan" class="plan-list plan-done"></ol>
+    </section>
+
+    <section class="card" id="orgs-card">
+      <div class="card-head">
+        <h2><span class="step-num">3</span> My orgs</h2>
+        <p class="card-sub">You see only the spokes you own. Open one with hub SSO &mdash; no new password.</p>
+      </div>
+      <div id="orgs-list" class="orgs-list">
+        <div class="empty">Nothing yet.</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/app.js"></script>
