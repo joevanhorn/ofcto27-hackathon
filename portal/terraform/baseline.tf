@@ -32,17 +32,9 @@ resource "okta_app_group_assignments" "welcome_baseline" {
   }
 }
 
-# ── Baseline password policy (a concrete required control) ────────────────────
-resource "okta_policy_password" "baseline" {
-  name            = "Baseline Password Policy"
-  status          = "ACTIVE"
-  description     = "Provisioned baseline — retention ${var.retention_days}d, region ${var.data_region}"
-  groups_included = [okta_group.baseline_users.id]
-
-  password_min_length          = 12
-  password_min_lowercase       = 1
-  password_min_uppercase       = 1
-  password_min_number          = 1
-  password_min_symbol          = 1
-  password_history_count       = 4
-}
+# Baseline = group + assigned app (both created reliably against the OIE org and
+# visible in the spoke admin console). Policy-type controls (password/MFA) are
+# shown in the portal as central-security-enforced chips; the OIE org rejected the
+# provider's default password-policy recovery settings, so we keep the baseline to
+# the resources that apply cleanly and let SAML federation (federation.tf) carry
+# the identity story.

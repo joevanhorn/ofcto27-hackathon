@@ -21,7 +21,6 @@ output "applied_summary" {
   value = [
     "Created baseline group '${okta_group.baseline_users.name}'",
     "Assigned app '${okta_app_bookmark.welcome.label}' to baseline users",
-    "Applied Baseline Password Policy (12+ chars, complexity, history)",
     "Template '${var.template_id}' — retention ${var.retention_days}d, region ${var.data_region}",
   ]
 }
