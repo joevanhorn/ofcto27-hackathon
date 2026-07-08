@@ -69,3 +69,8 @@ output "hub_sso_entry_url" {
   description = "Hub IdP-initiated SSO launch URL for the spoke app"
   value       = try(module.hub_federation[0].federation_sso_url, "")
 }
+
+output "spoke_audience" {
+  description = "Spoke external-IdP audience / SP entity ID (opaque) the hub app must send"
+  value       = try(module.spoke_federation[0].idp_audience, "")
+}

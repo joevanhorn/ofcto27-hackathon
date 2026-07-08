@@ -186,6 +186,10 @@ function buildRealConfig() {
     sswsAuth: sswsHeader(creds.HUB_API_TOKEN),
     spokes,
     hub,
+    // DEMO_FEDERATION=off -> the recorded Provision runs baseline-only (fast),
+    // and the SSO finale uses a pre-staged federation launch URL below.
+    federationInProvision: (process.env.DEMO_FEDERATION || "").toLowerCase() !== "off",
+    ssoEntryUrl: creds.HUB_SSO_ENTRY_URL || null,
   };
 }
 
@@ -464,7 +468,9 @@ export function createServer() {
           // Fire the apply asynchronously; the client watches it over SSE.
           provisionSpoke({
             spoke,
-            hub: REAL.hub, // real SAML Org2Org federation (hub is IdP)
+            hub: REAL.hub, // hub creds always (provider init); federation gated:
+            // DEMO_FEDERATION=off -> baseline-only + pre-staged SSO URL.
+            federation: REAL.federationInProvision,
             vars: {
               org_display_name: name,
               template_id: templateId,
@@ -486,7 +492,7 @@ export function createServer() {
                   login_url: outputs.spoke_login_url || null,
                   // "Open (SSO)" deep-links to the federated hub launch, not the
                   // bare spoke login — this is the hub-as-IdP hero moment.
-                  sso_entry_url: outputs.hub_sso_entry_url || null,
+                  sso_entry_url: outputs.hub_sso_entry_url || REAL.ssoEntryUrl || null,
                   hub_app_id: outputs.hub_app_id || null,
                 };
                 orgs.push(orgRecord);

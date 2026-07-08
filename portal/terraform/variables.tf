@@ -109,3 +109,9 @@ variable "hub_certificate" {
   default     = ""
   sensitive   = true
 }
+
+variable "spoke_audience" {
+  description = "Spoke external-IdP SP entity ID / audience (carried into the hub app; empty on pass 1)"
+  type        = string
+  default     = ""
+}

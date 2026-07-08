@@ -37,8 +37,11 @@ module "hub_federation" {
   use_remote_state = false
 
   app_label   = var.federation_label
-  sp_acs_url  = var.spoke_acs_url
-  sp_audience = "https://${var.spoke_org_name}.${var.spoke_base_url}"
+  sp_acs_url = var.spoke_acs_url
+  # Carry the spoke IdP's REAL SP entity ID (opaque, e.g.
+  # https://www.okta.com/saml2/service-provider/xxx) once the spoke exists;
+  # a placeholder on pass 1 just lets the hub app be created (non-empty).
+  sp_audience = var.spoke_audience != "" ? var.spoke_audience : "https://${var.spoke_org_name}.${var.spoke_base_url}"
 
   # Only members of this group can IdP-initiate into the spoke.
   assigned_group_ids = var.enable_federation ? [data.okta_group.hub_division_leads[0].id] : []

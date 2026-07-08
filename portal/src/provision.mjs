@@ -119,7 +119,7 @@ function runApply(stateFile, env, onLine) {
  * @param {(line: string) => void} args.onLine - called for every output line as it arrives (real streaming).
  * @returns {Promise<{ok: true, outputs: object} | {ok: false, code: number|null}>}
  */
-export async function provisionSpoke({ spoke, vars = {}, hub = null, onLine = () => {} }) {
+export async function provisionSpoke({ spoke, vars = {}, hub = null, federation = true, onLine = () => {} }) {
   const subdomain = subdomainOf(spoke);
   const baseUrl = baseUrlOf(spoke);
   const stateFile = path.join("state", `${subdomain}.tfstate`);
@@ -127,8 +127,10 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, onLine = ()
   // Ensure the per-spoke state directory exists.
   mkdirSync(path.join(TERRAFORM_DIR, "state"), { recursive: true });
 
-  // Federation is enabled only when the portal threaded real hub creds through.
-  const federationEnabled = !!(hub && hub.orgName && hub.apiToken);
+  // Federation resources are created only when real hub creds are threaded AND
+  // federation isn't explicitly disabled (baseline-only fast mode).
+  const hubCreds = !!(hub && hub.orgName && hub.apiToken);
+  const federationEnabled = federation !== false && hubCreds;
   const hubBase = (hub && hub.baseUrl) || "oktapreview.com";
 
   // Tokens (spoke AND hub) flow ONLY through env — never argv, never onLine.
@@ -144,7 +146,9 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, onLine = ()
     TF_VAR_data_region: vars.data_region || "us",
     TF_VAR_enable_federation: federationEnabled ? "true" : "false",
   };
-  if (federationEnabled) {
+  // Hub creds are set whenever available — the aliased okta.hub PROVIDER must
+  // initialize even in baseline-only mode (federation resources are count=0 then).
+  if (hubCreds) {
     env.TF_VAR_hub_org_name = hub.orgName;
     env.TF_VAR_hub_base_url = hubBase;
     env.TF_VAR_hub_api_token = bareToken(hub.apiToken);
