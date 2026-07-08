@@ -100,10 +100,13 @@ resource "okta_policy_rule_idp_discovery" "federation" {
   policy_id             = var.routing_policy_id
   priority              = var.routing_rule_priority
   status                = var.status
-  idp_type              = "SAML2"
-  idp_id                = okta_idp_saml.federation[0].id
   user_identifier_type  = "IDENTIFIER"
   user_identifier_attribute = "login"
+
+  idp_providers {
+    type = "SAML2"
+    id   = okta_idp_saml.federation[0].id
+  }
 
   user_identifier_patterns {
     match_type = "SUFFIX"
@@ -143,6 +146,9 @@ resource "okta_app_saml" "federation" {
   subject_name_id_template = "$${user.userName}"
   subject_name_id_format   = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
 
+  # Custom SAML apps must declare an authn context class (provider-required).
+  authn_context_class_ref = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
+
   # Signature settings
   response_signed          = true
   assertion_signed         = var.assertion_signed
@@ -163,9 +169,11 @@ resource "okta_app_saml" "federation" {
     }
   }
 
-  # App visibility (hide from user dashboard - this is a backend federation app)
-  hide_ios = true
-  hide_web = true
+  # App visibility. Federation apps are hidden by default (backend plumbing),
+  # but the hub->spoke app is exposed (hide_from_dashboard=false) so the
+  # Division Lead sees a launch tile for the IdP-initiated finale.
+  hide_ios = var.hide_from_dashboard
+  hide_web = var.hide_from_dashboard
 
   # Feature settings
   auto_submit_toolbar        = false

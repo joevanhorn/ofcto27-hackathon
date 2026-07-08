@@ -157,6 +157,12 @@ variable "assigned_group_ids" {
   default     = []
 }
 
+variable "hide_from_dashboard" {
+  description = "Hide the SAML app tile from the end-user dashboard (IdP mode). Set false to expose an IdP-initiated launch tile."
+  type        = bool
+  default     = true
+}
+
 # -----------------------------------------------------------------------------
 # JIT Provisioning Configuration (SP Mode)
 # -----------------------------------------------------------------------------

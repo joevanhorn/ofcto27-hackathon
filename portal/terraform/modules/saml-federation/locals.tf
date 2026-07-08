@@ -29,26 +29,20 @@ data "terraform_remote_state" "partner" {
 # -----------------------------------------------------------------------------
 
 locals {
-  # IdP configuration for SP mode (from partner's IdP mode outputs)
-  idp_issuer = coalesce(
-    try(data.terraform_remote_state.partner[0].outputs.federation_issuer, ""),
-    var.idp_issuer
-  )
+  # IdP configuration for SP mode (from partner's IdP mode outputs).
+  # Null-safe "remote else manual" resolution — coalesce() errors when every
+  # argument is empty, which happens on early converge passes (carriers still
+  # PENDING) and whenever manual vars are used without remote state.
+  _remote_idp_issuer = try(data.terraform_remote_state.partner[0].outputs.federation_issuer, "")
+  _remote_idp_sso    = try(data.terraform_remote_state.partner[0].outputs.federation_sso_url, "")
+  _remote_idp_cert   = try(data.terraform_remote_state.partner[0].outputs.federation_certificate, "")
+  _remote_idp_org    = try(data.terraform_remote_state.partner[0].outputs.okta_org_name, "")
 
-  idp_sso_url = coalesce(
-    try(data.terraform_remote_state.partner[0].outputs.federation_sso_url, ""),
-    var.idp_sso_url
-  )
+  idp_issuer      = local._remote_idp_issuer != "" ? local._remote_idp_issuer : var.idp_issuer
+  idp_sso_url     = local._remote_idp_sso != "" ? local._remote_idp_sso : var.idp_sso_url
+  idp_certificate = local._remote_idp_cert != "" ? local._remote_idp_cert : var.idp_certificate
 
-  idp_certificate = coalesce(
-    try(data.terraform_remote_state.partner[0].outputs.federation_certificate, ""),
-    var.idp_certificate
-  )
-
-  idp_name = coalesce(
-    var.idp_name,
-    "Federation from ${try(data.terraform_remote_state.partner[0].outputs.okta_org_name, "External IdP")}"
-  )
+  idp_name = var.idp_name != "" ? var.idp_name : "Federation from ${local._remote_idp_org != "" ? local._remote_idp_org : "External IdP"}"
 }
 
 # -----------------------------------------------------------------------------
@@ -60,27 +54,17 @@ locals {
 # -----------------------------------------------------------------------------
 
 locals {
-  # SP configuration for IdP mode (from partner's SP mode outputs)
-  sp_org_name = coalesce(
-    try(data.terraform_remote_state.partner[0].outputs.okta_org_name, ""),
-    var.sp_org_name
-  )
+  # SP configuration for IdP mode (from partner's SP mode outputs).
+  # Same null-safe "remote else manual else default" resolution as above.
+  _remote_sp_org  = try(data.terraform_remote_state.partner[0].outputs.okta_org_name, "")
+  _remote_sp_base = try(data.terraform_remote_state.partner[0].outputs.okta_base_url, "")
+  _remote_sp_idp  = try(data.terraform_remote_state.partner[0].outputs.idp_id, "")
 
-  sp_base_url = coalesce(
-    try(data.terraform_remote_state.partner[0].outputs.okta_base_url, ""),
-    var.sp_base_url,
-    "okta.com"
-  )
+  sp_org_name = local._remote_sp_org != "" ? local._remote_sp_org : var.sp_org_name
+  sp_base_url = local._remote_sp_base != "" ? local._remote_sp_base : (var.sp_base_url != "" ? var.sp_base_url : "okta.com")
+  sp_idp_id   = local._remote_sp_idp != "" ? local._remote_sp_idp : var.sp_idp_id
 
-  sp_idp_id = coalesce(
-    try(data.terraform_remote_state.partner[0].outputs.idp_id, ""),
-    var.sp_idp_id
-  )
-
-  app_label = coalesce(
-    var.app_label,
-    "Federation to ${local.sp_org_name}"
-  )
+  app_label = var.app_label != "" ? var.app_label : "Federation to ${local.sp_org_name}"
 }
 
 # -----------------------------------------------------------------------------
@@ -97,13 +81,13 @@ locals {
   # SP's SAML endpoints (for IdP mode - where we send assertions)
   # For Okta-to-Okta: use standard Okta URL format
   # For external SPs: use provided sp_acs_url and sp_audience
-  sp_acs_url = coalesce(
-    var.sp_acs_url,
+  # Null-safe: resolves to "" (not an error) when nothing is configured, so the
+  # SP-mode module instance — which never sets these — validates cleanly.
+  sp_acs_url = var.sp_acs_url != "" ? var.sp_acs_url : (
     local.sp_idp_id != "" ? "https://${local.sp_org_name}.${local.sp_base_url}/sso/saml2/${local.sp_idp_id}" : ""
   )
 
-  sp_audience_url = coalesce(
-    var.sp_audience,
+  sp_audience_url = var.sp_audience != "" ? var.sp_audience : (
     local.sp_org_name != "" ? "https://${local.sp_org_name}.${local.sp_base_url}" : ""
   )
 }

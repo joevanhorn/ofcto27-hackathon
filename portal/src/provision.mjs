@@ -43,36 +43,9 @@ function bareToken(token) {
   return (token || "").trim().replace(/^SSWS[ _]/i, "");
 }
 
-/**
- * Run `terraform apply` for one spoke, streaming output line-by-line.
- *
- * @param {object} args
- * @param {{domain: string, token: string, subdomain?: string}} args.spoke
- * @param {{org_display_name: string, template_id?: string, retention_days?: string, data_region?: string}} args.vars
- * @param {(line: string) => void} args.onLine - called for every output line as it arrives (real streaming).
- * @returns {Promise<{ok: true, outputs: object} | {ok: false, code: number|null}>}
- */
-export function provisionSpoke({ spoke, vars = {}, onLine = () => {} }) {
-  const subdomain = subdomainOf(spoke);
-  const baseUrl = baseUrlOf(spoke);
-  const stateFile = path.join("state", `${subdomain}.tfstate`);
-
-  // Ensure the per-spoke state directory exists.
-  mkdirSync(path.join(TERRAFORM_DIR, "state"), { recursive: true });
-
-  // Token flows ONLY through env — never argv, never onLine.
-  const env = {
-    ...process.env,
-    TF_IN_AUTOMATION: "1",
-    TF_VAR_spoke_org_name: subdomain,
-    TF_VAR_spoke_base_url: baseUrl,
-    TF_VAR_spoke_api_token: bareToken(spoke && spoke.token),
-    TF_VAR_org_display_name: vars.org_display_name || subdomain,
-    TF_VAR_template_id: vars.template_id || "standard-spoke",
-    TF_VAR_retention_days: String(vars.retention_days || "90"),
-    TF_VAR_data_region: vars.data_region || "us",
-  };
-
+// Run a single `terraform apply`, streaming stdout+stderr line-by-line to
+// onLine as soon as each newline arrives. Token never touches argv/onLine.
+function runApply(stateFile, env, onLine) {
   const applyArgs = [
     "apply",
     "-auto-approve",
@@ -82,10 +55,7 @@ export function provisionSpoke({ spoke, vars = {}, onLine = () => {} }) {
   ];
 
   return new Promise((resolve) => {
-    const child = spawn("terraform", applyArgs, {
-      cwd: TERRAFORM_DIR,
-      env,
-    });
+    const child = spawn("terraform", applyArgs, { cwd: TERRAFORM_DIR, env });
 
     // Line splitter shared across stdout+stderr so a callback fires per line as
     // soon as a newline arrives (not buffered until process exit).
@@ -126,16 +96,125 @@ export function provisionSpoke({ spoke, vars = {}, onLine = () => {} }) {
     child.on("close", (code) => {
       out.flush();
       err.flush();
-      if (code !== 0) {
-        resolve({ ok: false, code });
-        return;
-      }
-      // Collect outputs via a second, quiet terraform invocation.
-      collectOutputs(stateFile, env)
-        .then((outputs) => resolve({ ok: true, outputs }))
-        .catch(() => resolve({ ok: true, outputs: {} }));
+      resolve({ ok: code === 0, code });
     });
   });
+}
+
+/**
+ * Provision one spoke with a live-streamed `terraform apply`, then converge
+ * real SAML Org2Org federation (hub IdP -> spoke SP) over up to 3 passes.
+ *
+ * The two federation module instances (hub SAML app, spoke external IdP) never
+ * reference each other — that would cycle the graph. Instead we thread outputs
+ * of one pass into the *_url / hub_* carrier variables of the next:
+ *   pass 1  hub SAML app is created                 -> hub_issuer/sso/certificate
+ *   pass 2  spoke external IdP is created (needs hub creds) -> spoke_idp_id/acs
+ *   pass 3  hub app updated so recipient/destination target the real spoke ACS
+ *
+ * @param {object} args
+ * @param {{domain: string, token: string, subdomain?: string}} args.spoke
+ * @param {{org_display_name: string, template_id?: string, retention_days?: string, data_region?: string}} args.vars
+ * @param {{orgName: string, baseUrl?: string, apiToken: string}} [args.hub] - hub org creds; omit to skip federation.
+ * @param {(line: string) => void} args.onLine - called for every output line as it arrives (real streaming).
+ * @returns {Promise<{ok: true, outputs: object} | {ok: false, code: number|null}>}
+ */
+export async function provisionSpoke({ spoke, vars = {}, hub = null, onLine = () => {} }) {
+  const subdomain = subdomainOf(spoke);
+  const baseUrl = baseUrlOf(spoke);
+  const stateFile = path.join("state", `${subdomain}.tfstate`);
+
+  // Ensure the per-spoke state directory exists.
+  mkdirSync(path.join(TERRAFORM_DIR, "state"), { recursive: true });
+
+  // Federation is enabled only when the portal threaded real hub creds through.
+  const federationEnabled = !!(hub && hub.orgName && hub.apiToken);
+  const hubBase = (hub && hub.baseUrl) || "oktapreview.com";
+
+  // Tokens (spoke AND hub) flow ONLY through env — never argv, never onLine.
+  const env = {
+    ...process.env,
+    TF_IN_AUTOMATION: "1",
+    TF_VAR_spoke_org_name: subdomain,
+    TF_VAR_spoke_base_url: baseUrl,
+    TF_VAR_spoke_api_token: bareToken(spoke && spoke.token),
+    TF_VAR_org_display_name: vars.org_display_name || subdomain,
+    TF_VAR_template_id: vars.template_id || "standard-spoke",
+    TF_VAR_retention_days: String(vars.retention_days || "90"),
+    TF_VAR_data_region: vars.data_region || "us",
+    TF_VAR_enable_federation: federationEnabled ? "true" : "false",
+  };
+  if (federationEnabled) {
+    env.TF_VAR_hub_org_name = hub.orgName;
+    env.TF_VAR_hub_base_url = hubBase;
+    env.TF_VAR_hub_api_token = bareToken(hub.apiToken);
+    env.TF_VAR_federation_label = `Federation to ${vars.org_display_name || subdomain}`;
+  }
+
+  // Cross-org carriers, threaded pass-to-pass. Seed from any existing state so
+  // idempotent re-runs converge immediately instead of restarting from PENDING.
+  let spokeAcs = `https://${subdomain}.${baseUrl}/sso/saml2/PENDING`;
+  let hubIssuer = "";
+  let hubSso = "";
+  let hubCert = "";
+  if (federationEnabled) {
+    try {
+      const seed = await collectOutputs(stateFile, env);
+      if (seed.hub_issuer) hubIssuer = seed.hub_issuer;
+      if (seed.hub_sso_url) hubSso = seed.hub_sso_url;
+      if (seed.hub_certificate) hubCert = seed.hub_certificate;
+      if (seed.spoke_idp_id) {
+        spokeAcs = `https://${subdomain}.${baseUrl}/sso/saml2/${seed.spoke_idp_id}`;
+      }
+    } catch {
+      /* no prior state — start from PENDING */
+    }
+  }
+
+  const passes = federationEnabled ? 3 : 1;
+  let out = {};
+  for (let pass = 1; pass <= passes; pass++) {
+    // Feed the current carrier values into this apply.
+    env.TF_VAR_spoke_acs_url = spokeAcs;
+    env.TF_VAR_hub_issuer = hubIssuer;
+    env.TF_VAR_hub_sso_url = hubSso;
+    env.TF_VAR_hub_certificate = hubCert; // env only — never onLine
+
+    if (passes > 1) onLine(`>> federation converge pass ${pass}/${passes}`);
+
+    const r = await runApply(stateFile, env, onLine);
+    if (!r.ok) return { ok: false, code: r.code };
+
+    try {
+      out = await collectOutputs(stateFile, env);
+    } catch {
+      out = {};
+    }
+
+    if (!federationEnabled) break;
+
+    // Absorb this pass's outputs into the carriers for the next pass.
+    hubIssuer = out.hub_issuer || hubIssuer;
+    hubSso = out.hub_sso_url || hubSso;
+    hubCert = out.hub_certificate || hubCert;
+    const fedAcs = spokeAcs; // the ACS the hub app was configured with this pass
+    if (out.spoke_idp_id) {
+      spokeAcs = `https://${subdomain}.${baseUrl}/sso/saml2/${out.spoke_idp_id}`;
+    }
+    // Converged once the hub app has real creds AND was applied with the real
+    // spoke ACS (fedAcs === spokeAcs) — otherwise the hub still points at the
+    // PENDING placeholder and another pass is required.
+    if (
+      hubCert &&
+      out.spoke_idp_id &&
+      out.spoke_acs_url === spokeAcs &&
+      fedAcs === spokeAcs
+    ) {
+      break;
+    }
+  }
+
+  return { ok: true, outputs: out };
 }
 
 // Read `terraform output -json` for the given state file and flatten the

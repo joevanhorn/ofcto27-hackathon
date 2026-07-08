@@ -549,11 +549,12 @@ async function refreshMyOrgs() {
       ]),
     ]);
 
-    // Real mode: open the actual spoke sign-in URL from terraform outputs.
+    // Real mode: the federated IdP-initiated launch URL (hub -> spoke SSO, no new
+    // password), from terraform outputs; fall back to the spoke login URL.
     // Sim mode: the simulated hub SSO landing page.
     const target =
-      state.mode === "real" && org.login_url
-        ? org.login_url
+      state.mode === "real" && (org.sso_entry_url || org.login_url)
+        ? (org.sso_entry_url || org.login_url)
         : `/sso/${encodeURIComponent(org.id)}`;
     const openBtn = el("button", {
       className: "btn btn-primary",

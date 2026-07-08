@@ -160,11 +160,21 @@ function redirect(res, location) {
 // are loaded once at boot from the gitignored creds file and are NEVER logged.
 function buildRealConfig() {
   const creds = loadCreds();
-  const issuer = "https://" + normalizeOrgDomain(creds.HUB_ORG_DOMAIN || "");
+  const hubDomain = normalizeOrgDomain(creds.HUB_ORG_DOMAIN || "");
+  const issuer = "https://" + hubDomain;
   const spokes = spokePool(creds);
   // Pre-compute each spoke's subdomain once; it names the claimed org record
   // and the per-spoke terraform state file.
   for (const s of spokes) s.subdomain = subdomainOf(s);
+  // Split the hub domain into { subdomain, base } for the terraform hub
+  // provider (real SAML Org2Org federation). Token stays raw here — the
+  // terraform layer strips any "SSWS " prefix and passes it via env only.
+  const dot = hubDomain.indexOf(".");
+  const hub = {
+    orgName: dot > 0 ? hubDomain.slice(0, dot) : hubDomain,
+    baseUrl: dot > 0 ? hubDomain.slice(dot + 1) : "oktapreview.com",
+    apiToken: creds.HUB_API_TOKEN || "",
+  };
   return {
     issuer,
     authorizeEndpoint: `${issuer}/oauth2/v1/authorize`,
@@ -175,6 +185,7 @@ function buildRealConfig() {
     redirectUri: creds.OIDC_REDIRECT_URI,
     sswsAuth: sswsHeader(creds.HUB_API_TOKEN),
     spokes,
+    hub,
   };
 }
 
@@ -435,6 +446,7 @@ export function createServer() {
           // Fire the apply asynchronously; the client watches it over SSE.
           provisionSpoke({
             spoke,
+            hub: REAL.hub, // real SAML Org2Org federation (hub is IdP)
             vars: {
               org_display_name: name,
               template_id: templateId,
@@ -454,6 +466,10 @@ export function createServer() {
                   federation: "federated",
                   ownerId: user.id,
                   login_url: outputs.spoke_login_url || null,
+                  // "Open (SSO)" deep-links to the federated hub launch, not the
+                  // bare spoke login — this is the hub-as-IdP hero moment.
+                  sso_entry_url: outputs.hub_sso_entry_url || null,
+                  hub_app_id: outputs.hub_app_id || null,
                 };
                 orgs.push(orgRecord);
                 job.result = {
