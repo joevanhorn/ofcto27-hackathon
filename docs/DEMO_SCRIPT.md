@@ -1,85 +1,95 @@
 # Demo Script — Self-Service Okta Spoke Provisioning Portal
 
-*Finalist presentation. Target: 3 minutes. Everything below runs locally, offline, with no
-external calls — nothing can fail against a live tenant on stage.*
+Two ways to run it:
+- **REAL mode** (`DEMO_MODE=real`) — real Okta OIDC login, a real `terraform apply` streamed
+  live, and a real hub→spoke SAML SSO. This is what you **pre-record**.
+- **SIM mode** (default) — fully in-memory, no external calls, 25 passing tests. Your
+  **stage-safe fallback** if anything ever misbehaves.
 
-## Run it
+---
+
+## REAL MODE — the recording
+
+### Prerequisites (on the machine you record from)
+- Node 20+ and Terraform 1.9+ installed.
+- The repo cloned, and `~/okta-demo-creds.env` present (hub + spoke tokens + the OIDC
+  client_id/secret). Ask Claude to print it if you need to recreate it on your laptop.
+- Run on **port 3000** — the Okta OIDC app's redirect URI is `http://localhost:3000/callback`.
+
+### Launch
+```bash
+cd ofcto27-hackathon
+cd portal/terraform && terraform init >/dev/null && cd ../..   # once
+DEMO_MODE=real node portal/server.mjs                          # http://localhost:3000
+```
+
+### Recording logins (throwaway org)
+- **Division Lead (authorized):** `joe.vanhorn@okta.com` (your password)
+- **Non-member (blocked):** `sam.nomember@velocity27demo.com` / `Velocity27!demo`
+
+### Reset between takes
+- **Restart the server** — the claimed-spoke set and sessions are in-memory, so a restart
+  gives you clean pool + signed-out state.
+- If a take actually provisioned a spoke, reset that org so the next take creates on camera:
+  ```bash
+  cd portal/terraform
+  # (Claude can hand you a one-liner that destroys the per-spoke state for a clean reset.)
+  ```
+
+### The three beats (~3 minutes)
+
+**0:00 — Problem (one sentence).** "A division lead needs their own Okta org and waits days
+on a ticket, so they go shadow IT. We make the governed path the *fast* path."
+
+**0:20 — Beat 1: real login + the gate.** Click **Sign in with Okta** → authenticate as
+**joe.vanhorn** (real Okta login on the hub). You're in as a Division Lead.
+> *Optional block shot:* sign in as **sam.nomember** and try to provision → real **403**,
+> because Okta says he's not in `Division Leads`. Then switch back to joe.
+
+**1:00 — Beat 2: request → the backend flash.** Pick the **Standard Division Spoke** template,
+name it (e.g. "NA Sales Demo"), set the deterministic knobs (retention / region — dropdowns,
+no free text), **Preview plan**, then **Provision**. The **terraform terminal panel streams
+live** — `okta_group… Creating… Creation complete`, `Apply complete!`. That's a real
+`terraform apply` configuring a real Okta org on screen.
+
+**1:50 — Beat 3: the SSO finale.** The new org appears in **My Orgs**, federated. Two ways to
+land the finale (pick whichever looks cleanest in rehearsal):
+- **Portal button:** click **Open (SSO)** — deep-links the hub's IdP-initiated launch → you're
+  signed into the brand-new spoke, **no new password** (JIT-created there on the fly).
+- **Hub dashboard tile:** on joe's hub Okta dashboard, click the freshly-created spoke tile
+  (we made it visible) → same IdP-initiated SSO into the spoke.
+
+**2:40 — How it was built.** "Spec-first, then a team of AI sub-agents I architected — an
+Architect and Scrum Master dispatching Engineers against Okta, Terraform, and platform
+specialists — built this, in parallel. What you just saw is real Terraform + real Okta."
+
+### What's real vs. simulated (say if asked)
+Everything in the recording is real: real OIDC login, real Okta group authorization, a real
+`terraform apply` against a real spoke org, real SAML Org2Org federation, real JIT SSO. The
+only concession is the **pre-warmed pool** of blank orgs (claimed instead of birthed via the
+gated Org Creator API) — which is a legitimate production latency-hiding pattern, exactly as
+the spec states.
+
+### Pre-flight checklist (verify before recording)
+- `DEMO_MODE=real` server starts; `http://localhost:3000` loads; **Sign in with Okta** appears.
+- You can complete the Okta login as joe and land back signed in.
+- Provision streams terraform and ends in **My Orgs**.
+- **Open (SSO)** signs you into the spoke without a password prompt.
+- Both spokes are clean at the start of the take (no leftover baseline/IdP).
+
+---
+
+## SIM MODE — the stage-safe fallback (and the test suite)
 
 ```bash
-cd ofcto27-hackathon          # your clone (personal or org repo)
-node portal/server.mjs        # serves http://localhost:3000
+cd ofcto27-hackathon
+node portal/server.mjs        # → http://localhost:3000  (DEMO_MODE defaults to sim)
 ```
-Open **http://localhost:3000** in a browser.
-
-**Reset between rehearsals:** the pool + sessions are in-memory — just **restart the server**
-(Ctrl-C, re-run) to get all 5 blank orgs back and a clean slate.
-
-**Prove it's real (optional pre-show sanity):** `node --test portal/test/` → 25/25 passing.
-
-## What's real vs. simulated (say this if asked)
-
-- **Real:** the authorization gate (`Division Leads` group), the atomic single-use pool claim,
-  owner-scoped visibility — the exact logic, 25 automated tests.
-- **Simulated for a safe stage demo:** the Okta OIDC login (the identity switcher), the SAML
-  federation apply, and the Terraform apply. This is the same posture as the spec's decision to
-  claim from a *pre-warmed pool of blank orgs* — a legitimate production pattern, not a shortcut.
-
----
-
-## The 3-minute narrative
-
-**0:00 — The problem (one sentence, customer voice).**
-> "A division lead needs their own Okta org — for an M&A, a partner portal, a demo — and today
-> they file a ticket and wait days, so they go rogue and stand up a shadow AD instead. Central
-> security is stuck being the bottleneck *and* policing the sprawl."
-
-Land the thesis: **"Good security has to be *easier* than the insecure path. That's the whole
-product."**
-
-**0:30 — Self-service, governed.** Sign in (top-right) as **Division Lead**.
-> "I'm a division lead. I sign in with my existing hub identity — no new account."
-
-Pick the **Standard Division Spoke** template, name it e.g. *"NA Sales Demo,"* set the two
-options. Point at them:
-> "Everything I *can* choose is a dropdown — never free text. I physically cannot configure this
-> org into an insecure state. And these controls" *(the 🔒 chips)* "are locked by central
-> security and re-enforced on every Terraform apply."
-
-**1:15 — Plain-language plan → provision.** Click **Preview plan**, then **Provision**.
-> "Before anything happens, I see in plain English exactly what it will do — claim an org, apply
-> the baseline, federate to the hub, and scope me as owner of *only* this spoke."
-
-It provisions instantly (pool claim).
-
-**1:45 — The hero moment.** Go to **My Orgs**, click **Open (SSO)** on the new org.
-> "There's my new org, already federated. I click in — and I'm *signed straight in from the hub,
-> no new password.* SAML Org2Org, hub as IdP. Governed, and effortless."
-
-**2:15 — The guardrail (proof it's real).** Sign in as **Non-member**, try to provision.
-> "And if I'm *not* authorized — the request is blocked at the API, not just hidden in the UI.
-> The `Division Leads` group in Okta is the gate."
-
-**2:35 — How it was built (the meta-story judges love).**
-> "This was built spec-first (Day 1), then by a *team of AI sub-agents I architected* (Day 2) —
-> an Architect and a Scrum Master dispatching ephemeral Engineers against deep Okta, Terraform,
-> and platform specialists. This running app was built by that team, in parallel, and I
-> orchestrated it."
-
-**2:50 — What's next (shows you know the edges).**
-> "Next: wire the real OIDC tokens and the `saml-federation` Terraform module against a live hub,
-> and close the loop to central admins with Okta Aerial for fleet inventory and JIT access."
-
----
-
-## If you have 60 seconds, not 3
-
-Sign in as Lead → provision → **Open (SSO)** hero page → sign in as Non-member → blocked. That's
-the whole story: *governed, effortless, and safe by default.*
+Identity switcher (Division Lead vs Non-member), same request → plan → My Orgs → SSO flow, all
+in-memory. Prove it's real logic: `node --test portal/test/` → **25/25 passing**.
 
 ## Mapping to the judging dimensions
-
-- **Applicability:** it's built on reusable Terraform modules any Okta hub-and-spoke customer has.
-- **Customer voice:** the framing is the central-security + division-lead pain, not the tech.
-- **Innovativeness:** deterministic-knob templates + on-behalf-of agent provisioning via Cross App
-  Access.
-- **Wow factor:** one click → SSO into a brand-new, federated org with no new password.
+- **Applicability:** built on reusable Terraform modules any Okta hub-and-spoke customer has.
+- **Customer voice:** framed around the central-security + division-lead pain, not the tech.
+- **Innovativeness:** deterministic-knob templates + AI-agent-orchestrated build + real Org2Org.
+- **Wow factor:** one click → a real, freshly-provisioned, federated Okta org you SSO straight into.
