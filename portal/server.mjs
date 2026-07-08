@@ -216,6 +216,17 @@ async function fetchGroupNames(sub) {
     : [];
 }
 
+// Authoritative name/email from the hub profile (userinfo may omit them).
+async function fetchProfile(sub) {
+  const r = await fetch(
+    `${REAL.issuer}/api/v1/users/${encodeURIComponent(sub)}`,
+    { headers: { authorization: REAL.sswsAuth, accept: "application/json" } }
+  );
+  if (!r.ok) return null;
+  const u = await r.json();
+  return u && u.profile ? u.profile : null;
+}
+
 // ---------------------------------------------------------------------------
 // Server factory
 // ---------------------------------------------------------------------------
@@ -330,12 +341,19 @@ export function createServer() {
           if (!sub) return redirect(res, "/?error=userinfo");
 
           const groups = await fetchGroupNames(sub);
-          const user = {
-            id: sub,
-            email: ui.email || null,
-            name: ui.name || ui.email || sub,
-            groups,
-          };
+          let email = ui.email || ui.preferred_username || null;
+          let name =
+            ui.name ||
+            [ui.given_name, ui.family_name].filter(Boolean).join(" ").trim() ||
+            null;
+          if (!name || !email) {
+            const p = await fetchProfile(sub).catch(() => null);
+            if (p) {
+              name = name || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.login;
+              email = email || p.email || p.login;
+            }
+          }
+          const user = { id: sub, email: email || null, name: name || email || sub, groups };
           const newSid = crypto.randomUUID();
           realSessions.set(newSid, user);
           res.setHeader(
