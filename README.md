@@ -1,68 +1,82 @@
-# Office of the Field CTO - Velocity 27 Summit Hackathon
+# Self-Service Okta Spoke Provisioning Portal
 
-A three-day experiential learning hackathon focused on applied AI development practices. Each day introduces one concept — Define → Architect → Present — that you experience by building something real with Claude Code. Builds should connect to Okta/Auth0/Identity wherever reasonable.
+A self-service portal that lets authorized **Division Leads** stand up governed, templated Okta
+**spoke** orgs in minutes — no Okta expertise required — each auto-federated to a central hub in a
+hub-and-spoke architecture. A GUI and an expert agentic assistant both drive the same governed,
+Terraform-backed provisioning flow.
 
----
+**Guiding principle:** *good security is easier for the end user than being insecure.* The governed
+path is faster and lower-friction than shadow IT (a rogue AD instance or an ungoverned dev tenant),
+so the insecure option dies on its own.
 
-## Daily time context
+> Built at the OFCTO Velocity 27 Summit hackathon. **Day 1** produced the spec
+> (`docs/solution.md`, `docs/prd.md`); **Day 2** designed the multi-agent build team that
+> constructs it (`docs/multiAgentDesign.md`, `.claude/agents/`).
 
-| Day | Time | Focus |
-|-----|------|-------|
-| Day 1 | ~30 min | Spec-driven development + Getting on the same page |
-| Day 2 | ~20 min | LLM Context Windows + Multi Agent architecture |
-| Day 3 | ~20 min | Agent as Judge + finalist presentations + voting |
+## What it does
 
----
+1. A Division Lead signs in to the portal (Okta OIDC on the hub). Authorization to request an org
+   is gated by the **`Division Leads`** group — no group, no request.
+2. They pick a **template** and name their org; the portal shows a **plain-language preview** of
+   the Terraform plan.
+3. On approval, Terraform **claims a pre-warmed blank org** from a pool, applies a baseline
+   security template, and configures **SAML Org2Org federation** to the hub (hub-as-IdP).
+4. The requester is scoped as owner of **only their new spoke**, which appears in their "My Orgs"
+   dashboard — and they **SSO straight into it from the hub, no new password** (the demo hero
+   moment).
 
-## Pre-work (complete before Day 1)
+Central security/identity govern the fleet through **Okta Aerial** (inventory + JIT time-bound
+access), holding no standing super-admin across the estate. See `docs/solution.md` and
+`docs/prd.md` for the full spec and the resolved-decisions log (federation, template governance,
+pool lifecycle, agentic on-behalf-of auth).
 
-Complete all of these steps before the first session starts.
+## Agent Team (the build)
 
-1. **Set up Claude Code** — follow the [Claude Code Onboarding guide](https://oktainc.atlassian.net/wiki/spaces/BTPE/pages/628296601) on Confluence. This covers installation, API key configuration, and editor setup.
+This project is built by a **two-tier team of Claude Code sub-agents**, modelled on the
+`ai-scrum-starter` harness. The point is context-window discipline: each agent holds exactly what
+it needs and nothing more. Full rationale in [`docs/multiAgentDesign.md`](docs/multiAgentDesign.md);
+definitions in [`.claude/agents/`](.claude/agents/).
 
-2. **Create your hackathon repo** — once you are in the org, create a private repo inside `ofctoV27` using the official template:
-   ```
-   gh repo create ofctoV27/{YOUR_REPO_NAME} --template "ofctoV27/ofcto27_Hackathon" --private
-   ```
-   One repo per entry — solo or team. Pick a repo name that identifies you or your team.
+**You are the human Product Owner + Project Manager.** You talk to one chat — the Scrum Master —
+and it routes everything else.
 
-3. **Clone your repo locally**:
-   ```
-   gh repo clone ofctoV27/{YOUR_REPO_NAME}
-   ```
+| Tier | Agent | Role |
+|---|---|---|
+| 1 — Strategic | [Architect](.claude/agents/strategic/architect.md) | Turns your goal into a READY backlog + spikes; no code, no priority calls |
+| 1 — Strategic | [Scrum Master](.claude/agents/strategic/scrum-master.md) | Orchestrates & tracks; dispatches Engineers, surfaces decisions to you |
+| 2 — Implementation | [Engineer](.claude/agents/implementation/engineer.md) | Ephemeral; executes ONE story, reports a handoff block, then terminates |
+| 2 — Specialist | [Okta / Identity](.claude/agents/implementation/okta-identity-specialist.md) | The *what/why* of identity — federation, OIDC, gating, Aerial, XAA |
+| 2 — Specialist | [Terraform](.claude/agents/implementation/terraform-specialist.md) | The *how* of IaC — Okta/AWS providers, reusable modules, state |
+| 2 — Specialist | [Platform](.claude/agents/implementation/platform-specialist.md) | Ground-truth facts of the existing AWS hosting environment |
 
-If you hit any setup issues, contact the event organisers before Day 1.
+## How to run the build
 
----
+1. Open Claude Code **inside this repo** (as the workspace), on a branch.
+2. Hand the **Architect** a goal (start with the tracer thread in `docs/multiAgentDesign.md`); it
+   returns a READY backlog.
+3. Give the approved backlog to the **Scrum Master**; it checks the Definition of Ready and
+   dispatches **Engineers** in parallel for independent stories. Ask "where are we?" any time.
+4. When an Engineer **stops and surfaces**, that's by design — answer its handoff question and a
+   fresh Engineer continues. You own every direction call.
 
-## Each day, in order
+New to the team model? Read *"How this team works for you (the human)"* in
+[`docs/multiAgentDesign.md`](docs/multiAgentDesign.md) first — it covers the one-chat-box model,
+build-agents vs. the product's own agent, the Definition of Ready, and what to do when an Engineer
+stops.
 
-1. **Attend the day's concept intro** — 5 minutes at the start of each session. Don't skip it.
-2. **Open your repo in your editor of choice** — VS Code or terminal, from the root of your cloned repo.
-3. **Start your session** — run `/start-day` as your first message to Claude. This loads the day's coaching, sets up the context, and kicks things off.
-4. **Hack** — work with Claude, answer its prompts, challenge it, brainstorm. This is the build session. Commit often!
-5. **Wrap up** — when your time is up, run `/wrap-day`. This commits and submits everything. Day 1 and Day 2 only — not needed on Day 3.
+## Reuse
 
-### `/start-day`
-Run this every morning before you do anything else. It loads the day's coaching context and kicks off the day's workflow. Nothing meaningful should happen before you run this — including writing code.
+Most of the provisioning back end already exists in
+[`joevanhorn/okta-terraform-demo-template`](https://github.com/joevanhorn/okta-terraform-demo-template)
+— `modules/saml-federation`, the `environments/<org>` pattern, `aws-backend`, `demo-builder`, and
+the `ai-assisted` generator. See [`docs/building-blocks.md`](docs/building-blocks.md) for the reuse
+map vs. the net-new portal + pool-claim work.
 
-### `/wrap-day`
-Run this at the end of Day 1 and Day 2. Not needed on Day 3.
+## Security note
 
-It generates a summary of what you built and decided, commits everything including your session prompt log, tags your submission, and pushes. This is how your work gets submitted. If you don't run it, your day's work is not visible to the evaluation system.
-
----
-
-## Expectations
-
-**Identity relevance:** Wherever reasonable, connect your build to Okta, Auth0, or the identity space. This is a judging criterion. You do not need to force it, but you should look for the angle.
-
-**Commit behaviour:** Commit frequently with meaningful messages. Describe what you decided and why, not just what changed as it tells the story of how you built, not just what you built. Short, vague commits aren't your friend.
-
-**Prompt quality:** Your session prompts are logged automatically. How you interact with Claude — the quality of your questions, how you direct the work, how you iterate is key to this exercise.
-
----
-
-## Getting help
-
-For questions about the hackathon format, evaluation, or logistics: speak to the event organisers directly.
+The build team is threat-modelled (see the *Threat Model & Hardening* section of
+`docs/multiAgentDesign.md`). The ephemeral one-Engineer-per-story pattern contains prompt-injection
+blast radius; agent definitions are read-only at runtime; the "trivial fix" exception never applies
+to auth/SAML paths. Adopters running this outside the hackathon should also apply the hard
+guardrails listed there (`settings.json` allow-list, tool-target-based autonomy gating, `git push`
+egress control).
