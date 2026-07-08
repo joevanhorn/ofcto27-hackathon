@@ -21,7 +21,9 @@ import {
   loadCreds,
   normalizeOrgDomain,
   sswsHeader,
+  spokePool,
 } from "./src/config.mjs";
+import { provisionSpoke, subdomainOf } from "./src/provision.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -159,6 +161,10 @@ function redirect(res, location) {
 function buildRealConfig() {
   const creds = loadCreds();
   const issuer = "https://" + normalizeOrgDomain(creds.HUB_ORG_DOMAIN || "");
+  const spokes = spokePool(creds);
+  // Pre-compute each spoke's subdomain once; it names the claimed org record
+  // and the per-spoke terraform state file.
+  for (const s of spokes) s.subdomain = subdomainOf(s);
   return {
     issuer,
     authorizeEndpoint: `${issuer}/oauth2/v1/authorize`,
@@ -168,7 +174,20 @@ function buildRealConfig() {
     clientSecret: creds.OIDC_CLIENT_SECRET,
     redirectUri: creds.OIDC_REDIRECT_URI,
     sswsAuth: sswsHeader(creds.HUB_API_TOKEN),
+    spokes,
   };
+}
+
+// Map the portal's closed-choice options onto terraform's deterministic knobs.
+function retentionDays(options) {
+  const r = (options && options.retention) || "";
+  if (r === "180d") return "180";
+  if (r === "1y") return "365";
+  return "90";
+}
+function dataRegion(options) {
+  const region = (options && options.region) || "us";
+  return String(region).toLowerCase();
 }
 
 const REAL = IS_REAL ? buildRealConfig() : null;
@@ -196,6 +215,14 @@ export function createServer() {
   const sessions = new Map(); // sid -> userId
   const realSessions = new Map(); // sid -> real user object {id,email,name,groups}
   const pendingStates = new Map(); // sid -> { state } (CSRF, pre-callback)
+
+  // Real-mode (IS_REAL) provisioning state — all in-memory, never touched in
+  // sim mode. `claimed` guards single-use spoke handout; `jobs` holds live
+  // terraform runs (line buffers streamed to SSE); `orgs` is the owner-scoped
+  // record of provisioned spokes shown in "My orgs".
+  const claimed = new Set(); // spoke subdomains already handed out
+  const jobs = new Map(); // jobId -> { lines, done, result, spoke, user, name, templateId }
+  const orgs = []; // provisioned org records
 
   function currentUser(req) {
     const cookies = parseCookies(req);
@@ -381,6 +408,71 @@ export function createServer() {
           return sendJson(res, 400, { error: "unknown template" });
         }
 
+        // --- Real mode: claim a spoke and run a live terraform apply -------
+        if (IS_REAL) {
+          const spoke = (REAL.spokes || []).find(
+            (s) => s.token && !claimed.has(s.subdomain)
+          );
+          if (!spoke) {
+            return sendJson(res, 409, { error: "pool exhausted" });
+          }
+          claimed.add(spoke.subdomain);
+
+          const name = (body && body.name) || `${template.name} spoke`;
+          const options = (body && body.options) || {};
+          const jobId = crypto.randomUUID();
+          const job = {
+            lines: [],
+            done: false,
+            result: null,
+            spoke,
+            user,
+            name,
+            templateId,
+          };
+          jobs.set(jobId, job);
+
+          // Fire the apply asynchronously; the client watches it over SSE.
+          provisionSpoke({
+            spoke,
+            vars: {
+              org_display_name: name,
+              template_id: templateId,
+              retention_days: retentionDays(options),
+              data_region: dataRegion(options),
+            },
+            onLine: (line) => job.lines.push(line),
+          })
+            .then((r) => {
+              if (r.ok) {
+                const outputs = r.outputs || {};
+                const orgRecord = {
+                  id: spoke.subdomain,
+                  name,
+                  template: templateId,
+                  status: "claimed",
+                  federation: "federated",
+                  ownerId: user.id,
+                  login_url: outputs.spoke_login_url || null,
+                };
+                orgs.push(orgRecord);
+                job.result = {
+                  org: orgRecord,
+                  plan: outputs.applied_summary || [],
+                };
+              } else {
+                job.result = { error: "provisioning failed", code: r.code };
+              }
+              job.done = true;
+            })
+            .catch((e) => {
+              job.result = { error: "provisioning failed", detail: String(e && e.message) };
+              job.done = true;
+            });
+
+          return sendJson(res, 200, { jobId });
+        }
+
         let org;
         try {
           org = claimOrg(pool, user.id);
@@ -403,13 +495,64 @@ export function createServer() {
         return sendJson(res, 200, { org, plan });
       }
 
+      // --- Live terraform stream (SSE, real mode only) -------------------
+      if (
+        IS_REAL &&
+        method === "GET" &&
+        pathname.startsWith("/api/provision/") &&
+        pathname.endsWith("/stream")
+      ) {
+        const jobId = pathname.slice(
+          "/api/provision/".length,
+          -"/stream".length
+        );
+        const job = jobs.get(jobId);
+        if (!job) {
+          return sendJson(res, 404, { error: "not found" });
+        }
+
+        res.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        });
+
+        let cursor = 0;
+        let closed = false;
+        const finish = () => {
+          if (closed) return;
+          closed = true;
+          clearInterval(timer);
+          res.end();
+        };
+        const timer = setInterval(() => {
+          if (closed) return;
+          // Flush any newly-buffered lines.
+          while (cursor < job.lines.length) {
+            res.write(`data: ${job.lines[cursor++]}\n\n`);
+          }
+          if (job.done) {
+            const payload = job.result && job.result.org
+              ? { org: job.result.org, plan: job.result.plan }
+              : { error: (job.result && job.result.error) || "provisioning failed" };
+            res.write(`event: done\ndata: ${JSON.stringify(payload)}\n\n`);
+            finish();
+          }
+        }, 150);
+
+        req.on("close", finish);
+        return; // response stays open, driven by the interval
+      }
+
       // --- My orgs -------------------------------------------------------
       if (method === "GET" && pathname === "/api/my-orgs") {
         const user = currentUser(req);
         if (!user) {
           return sendJson(res, 401, { error: "not authenticated" });
         }
-        return sendJson(res, 200, { orgs: listMyOrgs(pool, user.id) });
+        // Real mode lists the terraform-provisioned orgs; sim lists the pool.
+        const source = IS_REAL ? orgs : pool;
+        return sendJson(res, 200, { orgs: listMyOrgs(source, user.id) });
       }
 
       // --- Simulated hub SSO (the hero moment) ---------------------------

@@ -212,6 +212,8 @@ function resetFlowPanels() {
   $("#result-card").hidden = true;
   $("#guardrail-banner").hidden = true;
   $("#provision-btn").hidden = true;
+  const term = $("#terraform-card");
+  if (term) term.hidden = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +323,133 @@ function onPreview() {
   $("#plan-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+// -------------------------------------------------------------------------
+// Real-mode provisioning: POST returns a jobId, then we stream the live
+// terraform apply over Server-Sent Events into the terminal console panel.
+// -------------------------------------------------------------------------
+function resetTerminal() {
+  const pre = $("#terraform-lines");
+  if (pre) pre.textContent = "";
+}
+
+function appendTermLine(text, kind) {
+  const pre = $("#terraform-lines");
+  if (!pre) return;
+  const line = el("span", { className: "tline" + (kind ? " tline-" + kind : "") }, [
+    text,
+  ]);
+  line.appendChild(document.createTextNode("\n"));
+  pre.appendChild(line);
+  // Auto-scroll to the newest line.
+  const body = pre.closest(".term-body") || pre;
+  body.scrollTop = body.scrollHeight;
+}
+
+// Classify a raw terraform line for light syntax coloring in the console.
+function termKind(text) {
+  if (/error|failed|\bfatal\b/i.test(text)) return "err";
+  if (/(Creation complete|Apply complete|Modifications complete)/i.test(text)) return "add";
+  if (/(Creating\.\.\.|Modifying\.\.\.|Still creating)/i.test(text)) return null;
+  return null;
+}
+
+async function onProvisionReal() {
+  const tpl = selectedTemplate();
+  if (!tpl) return;
+  const name = $("#org-name").value.trim();
+  const options = collectOptions(tpl);
+
+  const btn = $("#provision-btn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Provisioning…';
+
+  const { status, body } = await jsonFetch(API.requests, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, templateId: tpl.id, options }),
+  });
+
+  // Non-200 short-circuits reuse the same guardrail / session / pool handling.
+  if (status !== 200 || !body || !body.jobId) {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="btn-label">Provision spoke</span>';
+    if (status === 403) {
+      $("#plan-card").hidden = true;
+      $("#result-card").hidden = true;
+      $("#guardrail-banner").hidden = false;
+      $("#guardrail-banner").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      toast("Blocked by the governance guardrail.", true);
+      return;
+    }
+    if (status === 401) {
+      toast("Your session expired — please sign in again.", true);
+      state.user = null;
+      onIdentityChange();
+      return;
+    }
+    if (status === 409) {
+      toast((body && body.error) || "The spoke pool is exhausted.", true);
+      return;
+    }
+    toast((body && body.error) || "Provisioning failed.", true);
+    return;
+  }
+
+  // Reveal the live terminal and stream the apply.
+  $("#plan-card").hidden = true;
+  $("#guardrail-banner").hidden = true;
+  $("#result-card").hidden = true;
+  resetTerminal();
+  $("#terraform-card").hidden = false;
+  appendTermLine("$ terraform apply -auto-approve", "done");
+  $("#terraform-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  const es = new EventSource(API.requests.replace(/\/requests$/, "") + "/provision/" + body.jobId + "/stream");
+
+  es.onmessage = (e) => {
+    appendTermLine(e.data, termKind(e.data));
+  };
+
+  es.addEventListener("done", (e) => {
+    es.close();
+    btn.disabled = false;
+    btn.innerHTML = '<span class="btn-label">Provision spoke</span>';
+
+    let payload = null;
+    try { payload = JSON.parse(e.data); } catch { /* ignore */ }
+
+    if (!payload || !payload.org) {
+      appendTermLine((payload && payload.error) || "provisioning failed", "err");
+      toast((payload && payload.error) || "Provisioning failed.", true);
+      return;
+    }
+
+    appendTermLine("Apply complete — spoke provisioned.", "done");
+    btn.hidden = true;
+    $("#result-sub").textContent = `${payload.org.name} · ${payload.org.id} · federated ✓`;
+    renderPlan("#result-plan", payload.plan || []);
+    $("#result-card").hidden = false;
+    $("#result-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    toast("Spoke provisioned and federated.");
+    refreshMyOrgs();
+  });
+
+  es.onerror = () => {
+    // The server closes the stream after `done`; only surface real failures.
+    if (es.readyState === EventSource.CLOSED) return;
+    es.close();
+    btn.disabled = false;
+    btn.innerHTML = '<span class="btn-label">Provision spoke</span>';
+    appendTermLine("stream interrupted", "err");
+    toast("Live stream interrupted.", true);
+  };
+}
+
 async function onProvision() {
+  if (state.mode === "real") {
+    return onProvisionReal();
+  }
+
   const tpl = selectedTemplate();
   if (!tpl) return;
   const name = $("#org-name").value.trim();
@@ -421,10 +549,16 @@ async function refreshMyOrgs() {
       ]),
     ]);
 
+    // Real mode: open the actual spoke sign-in URL from terraform outputs.
+    // Sim mode: the simulated hub SSO landing page.
+    const target =
+      state.mode === "real" && org.login_url
+        ? org.login_url
+        : `/sso/${encodeURIComponent(org.id)}`;
     const openBtn = el("button", {
       className: "btn btn-primary",
       textContent: "Open (SSO)",
-      onclick: () => { window.location.href = `/sso/${encodeURIComponent(org.id)}`; },
+      onclick: () => { window.location.href = target; },
     });
 
     list.appendChild(el("div", { className: "org" }, [info, openBtn]));

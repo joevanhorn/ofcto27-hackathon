@@ -85,6 +85,22 @@
       <ol id="plan-list" class="plan-list"></ol>
     </section>
 
+    <section class="card terraform-card" id="terraform-card" hidden>
+      <div class="card-head">
+        <h2><span class="step-num">2</span> Provisioning &mdash; terraform</h2>
+        <p class="card-sub">Live <code>terraform apply</code> against the claimed spoke org.</p>
+      </div>
+      <div class="term" id="terraform-console" aria-live="polite">
+        <div class="term-bar">
+          <span class="term-dot term-dot-r"></span>
+          <span class="term-dot term-dot-y"></span>
+          <span class="term-dot term-dot-g"></span>
+          <span class="term-title">terraform apply</span>
+        </div>
+        <pre class="term-body" id="terraform-lines"></pre>
+      </div>
+    </section>
+
     <section class="card card-success" id="result-card" hidden>
       <div class="card-head">
         <h2><span class="success-check" aria-hidden="true">&#10003;</span> Spoke provisioned</h2>
