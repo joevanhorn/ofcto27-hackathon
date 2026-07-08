@@ -10,3 +10,10 @@ docs/solutionDesign.md
 **/.demo-creds*.env
 okta-demo-creds.env
 node_modules/
+
+# Terraform (state, local dirs, real tfvars)
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+portal/terraform/terraform.tfvars
+crash.log

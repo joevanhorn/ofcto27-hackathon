@@ -1,0 +1,9 @@
+# Example only — the portal writes the real tfvars per request and injects the
+# spoke token from ~/okta-demo-creds.env. Never commit real tokens.
+spoke_org_name   = "your-spoke"
+spoke_base_url   = "okta.com"
+spoke_api_token  = "SSWS_xxx"
+org_display_name = "NA Sales Demo"
+template_id      = "standard-spoke"
+retention_days   = "90"
+data_region      = "us"
