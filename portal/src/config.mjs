@@ -17,16 +17,39 @@ export function loadCreds() {
   if (existsSync(path)) {
     for (const line of readFileSync(path, "utf8").split("\n")) {
       if (/^\s*#/.test(line) || !line.trim()) continue;
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-      if (m) creds[m[1]] = m[2].replace(/^["']|["']$/g, "").trim();
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
+      if (!m) continue;
+      let val = m[2].replace(/\s+#.*$/, ""); // strip inline comment
+      val = val.replace(/^["']|["']$/g, "").trim();
+      creds[m[1]] = val;
     }
   }
   return creds;
+}
+
+// Okta base org domain: strip scheme/path and the "-admin" console suffix, so
+// "https://acme-admin.oktapreview.com/" -> "acme.oktapreview.com".
+export function normalizeOrgDomain(d) {
+  if (!d) return d;
+  d = d.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  const i = d.indexOf(".");
+  if (i > 0) d = d.slice(0, i).replace(/-admin$/i, "") + d.slice(i);
+  return d;
+}
+
+// Build the SSWS Authorization header value from a token that may or may not
+// already carry an "SSWS " / "SSWS_" prefix.
+export function sswsHeader(token) {
+  if (!token) return null;
+  return "SSWS " + token.trim().replace(/^SSWS[ _]/i, "");
 }
 
 // Parse the comma-separated spoke pool into {domain, token} pairs.
 export function spokePool(creds) {
   const domains = (creds.SPOKE_ORG_DOMAINS || "").split(",").map((s) => s.trim()).filter(Boolean);
   const tokens = (creds.SPOKE_API_TOKENS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  return domains.map((domain, i) => ({ domain, token: tokens[i] || null }));
+  return domains.map((domain, i) => ({
+    domain: normalizeOrgDomain(domain),
+    token: tokens[i] || null,
+  }));
 }
