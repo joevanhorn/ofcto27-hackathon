@@ -4,3 +4,9 @@ docs/handover.txt
 docs/solutionDesign.md
 .claude/settings.local.json
 .env
+# Real-mode demo credentials (never commit)
+*.env
+!portal/.demo-creds.example.env
+**/.demo-creds*.env
+okta-demo-creds.env
+node_modules/
