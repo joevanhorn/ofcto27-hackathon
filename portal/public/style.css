@@ -127,6 +127,8 @@ body {
 }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: .55; cursor: default; }
+/* Anchor elements used as buttons (real-mode /login and /logout links). */
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 
 .btn-primary {
   background: linear-gradient(150deg, var(--accent), var(--accent-dark));

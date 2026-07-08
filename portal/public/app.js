@@ -20,6 +20,7 @@ const CREDS = { credentials: "same-origin" };
 const state = {
   user: null,
   templates: [],
+  mode: "sim", // "sim" | "real" — set from GET /api/session
 };
 
 // ---------------------------------------------------------------------------
@@ -56,9 +57,67 @@ async function jsonFetch(url, opts = {}) {
 // ---------------------------------------------------------------------------
 // Identity / session
 // ---------------------------------------------------------------------------
+// Real Okta OIDC identity strip: a single "Sign in with Okta" link, or the
+// signed-in user's name/email + a "Sign out" link. Navigations (not fetches)
+// because /login and /logout are server-side redirect endpoints.
+function renderRealIdentity(host) {
+  const label = $(".identity-label");
+  if (label) label.textContent = "Signed in with Okta at the hub";
+
+  if (!state.user) {
+    host.appendChild(
+      el("a", {
+        className: "btn btn-login",
+        href: "/login",
+        textContent: "Sign in with Okta",
+      })
+    );
+    return;
+  }
+
+  const u = state.user;
+  const isLead = (u.groups || []).includes("Division Leads");
+  const initials = (u.name || u.email || "?")
+    .replace(/\(.*?\)/g, "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+
+  host.appendChild(
+    el("div", { className: "who" + (isLead ? "" : " who-nonmember") }, [
+      el("span", { className: "avatar", textContent: initials || "?" }),
+      el("div", { className: "who-text" }, [
+        el("div", { className: "who-name", textContent: u.name || u.email }),
+        el("div", {
+          className: "who-groups",
+          textContent: u.email
+            ? u.email + (isLead ? " · Division Leads ✓" : "")
+            : isLead
+            ? "Division Leads ✓"
+            : "No provisioning group",
+        }),
+      ]),
+    ])
+  );
+  host.appendChild(
+    el("a", {
+      className: "btn btn-signout",
+      href: "/logout",
+      textContent: "Sign out",
+    })
+  );
+}
+
 function renderIdentity() {
   const host = $("#identity-controls");
   host.textContent = "";
+
+  if (state.mode === "real") {
+    return renderRealIdentity(host);
+  }
 
   if (!state.user) {
     host.appendChild(
@@ -386,6 +445,7 @@ async function loadTemplates() {
 async function loadSession() {
   const { status, body } = await jsonFetch(API.session);
   state.user = status === 200 && body ? body.user : null;
+  if (status === 200 && body && body.mode) state.mode = body.mode;
 }
 
 function wireEvents() {
@@ -400,11 +460,22 @@ function wireEvents() {
   });
 }
 
+// Surface a real-mode login error passed back on the redirect URL, then strip
+// it so a refresh is clean. Never contains tokens — just a short code.
+function showLoginErrorFromUrl() {
+  const err = new URLSearchParams(window.location.search).get("error");
+  if (!err) return;
+  toast(`Sign-in failed (${err}). Please try again.`, true);
+  const clean = window.location.pathname;
+  window.history.replaceState({}, "", clean);
+}
+
 async function boot() {
   wireEvents();
   await loadTemplates();
   await loadSession();
   onIdentityChange();
+  showLoginErrorFromUrl();
 }
 
 boot();

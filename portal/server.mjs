@@ -15,6 +15,13 @@ import { authorizeRequest } from "./src/authz.mjs";
 import { claimOrg } from "./src/pool.mjs";
 import { listMyOrgs } from "./src/myorgs.mjs";
 import { DEMO_USERS, TEMPLATES, makePool } from "./src/data.mjs";
+import {
+  DEMO_MODE,
+  IS_REAL,
+  loadCreds,
+  normalizeOrgDomain,
+  sswsHeader,
+} from "./src/config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -138,6 +145,47 @@ function buildPlan(org, template, user) {
   ];
 }
 
+function redirect(res, location) {
+  res.writeHead(302, { location });
+  res.end();
+}
+
+// ---------------------------------------------------------------------------
+// Real-mode (DEMO_MODE=real) Okta OIDC wiring
+// ---------------------------------------------------------------------------
+// Everything below is guarded by IS_REAL. In sim mode REAL stays null and none
+// of the real routes are reachable, so the demo flow is untouched. Credentials
+// are loaded once at boot from the gitignored creds file and are NEVER logged.
+function buildRealConfig() {
+  const creds = loadCreds();
+  const issuer = "https://" + normalizeOrgDomain(creds.HUB_ORG_DOMAIN || "");
+  return {
+    issuer,
+    authorizeEndpoint: `${issuer}/oauth2/v1/authorize`,
+    tokenEndpoint: `${issuer}/oauth2/v1/token`,
+    userinfoEndpoint: `${issuer}/oauth2/v1/userinfo`,
+    clientId: creds.OIDC_CLIENT_ID,
+    clientSecret: creds.OIDC_CLIENT_SECRET,
+    redirectUri: creds.OIDC_REDIRECT_URI,
+    sswsAuth: sswsHeader(creds.HUB_API_TOKEN),
+  };
+}
+
+const REAL = IS_REAL ? buildRealConfig() : null;
+
+// Fetch real Okta group membership for a user and return the group names.
+async function fetchGroupNames(sub) {
+  const r = await fetch(
+    `${REAL.issuer}/api/v1/users/${encodeURIComponent(sub)}/groups`,
+    { headers: { authorization: REAL.sswsAuth, accept: "application/json" } }
+  );
+  if (!r.ok) throw new Error("group lookup failed");
+  const arr = await r.json();
+  return Array.isArray(arr)
+    ? arr.map((g) => g && g.profile && g.profile.name).filter(Boolean)
+    : [];
+}
+
 // ---------------------------------------------------------------------------
 // Server factory
 // ---------------------------------------------------------------------------
@@ -146,11 +194,14 @@ export function createServer() {
   // Per-server isolated state.
   const pool = makePool();
   const sessions = new Map(); // sid -> userId
+  const realSessions = new Map(); // sid -> real user object {id,email,name,groups}
+  const pendingStates = new Map(); // sid -> { state } (CSRF, pre-callback)
 
   function currentUser(req) {
     const cookies = parseCookies(req);
     const sid = cookies.sid;
     if (!sid) return null;
+    if (IS_REAL) return realSessions.get(sid) || null;
     const userId = sessions.get(sid);
     if (!userId) return null;
     return (
@@ -177,12 +228,107 @@ export function createServer() {
         return serveStatic(res, pathname.slice(1));
       }
 
+      // --- Real-mode Okta OIDC (guarded; unreachable in sim) --------------
+      if (IS_REAL && (method === "GET" || method === "HEAD") && pathname === "/login") {
+        const state = crypto.randomBytes(16).toString("hex");
+        const nonce = crypto.randomBytes(16).toString("hex");
+        const sid = crypto.randomUUID();
+        pendingStates.set(sid, { state });
+        const authz = new URL(REAL.authorizeEndpoint);
+        authz.searchParams.set("client_id", REAL.clientId);
+        authz.searchParams.set("response_type", "code");
+        authz.searchParams.set("scope", "openid profile email");
+        authz.searchParams.set("redirect_uri", REAL.redirectUri);
+        authz.searchParams.set("state", state);
+        authz.searchParams.set("nonce", nonce);
+        res.setHeader("set-cookie", `sid=${sid}; Path=/; HttpOnly; SameSite=Lax`);
+        return redirect(res, authz.toString());
+      }
+
+      if (IS_REAL && method === "GET" && pathname === "/callback") {
+        try {
+          const code = url.searchParams.get("code");
+          const state = url.searchParams.get("state");
+          const sid = parseCookies(req).sid;
+          const pending = sid ? pendingStates.get(sid) : null;
+          if (!pending || !state || state !== pending.state) {
+            return redirect(res, "/?error=state");
+          }
+          pendingStates.delete(sid);
+          if (!code) return redirect(res, "/?error=no_code");
+
+          // Exchange the authorization code for tokens (HTTP Basic client auth).
+          const basic = Buffer.from(
+            `${REAL.clientId}:${REAL.clientSecret}`
+          ).toString("base64");
+          const tokenRes = await fetch(REAL.tokenEndpoint, {
+            method: "POST",
+            headers: {
+              authorization: `Basic ${basic}`,
+              "content-type": "application/x-www-form-urlencoded",
+              accept: "application/json",
+            },
+            body: new URLSearchParams({
+              grant_type: "authorization_code",
+              code,
+              redirect_uri: REAL.redirectUri,
+            }).toString(),
+          });
+          if (!tokenRes.ok) return redirect(res, "/?error=token");
+          const tokens = await tokenRes.json();
+          const accessToken = tokens && tokens.access_token;
+          if (!accessToken) return redirect(res, "/?error=token");
+
+          // Resolve the identity, then real group membership (admin token).
+          const uiRes = await fetch(REAL.userinfoEndpoint, {
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+              accept: "application/json",
+            },
+          });
+          if (!uiRes.ok) return redirect(res, "/?error=userinfo");
+          const ui = await uiRes.json();
+          const sub = ui && ui.sub;
+          if (!sub) return redirect(res, "/?error=userinfo");
+
+          const groups = await fetchGroupNames(sub);
+          const user = {
+            id: sub,
+            email: ui.email || null,
+            name: ui.name || ui.email || sub,
+            groups,
+          };
+          const newSid = crypto.randomUUID();
+          realSessions.set(newSid, user);
+          res.setHeader(
+            "set-cookie",
+            `sid=${newSid}; Path=/; HttpOnly; SameSite=Lax`
+          );
+          return redirect(res, "/");
+        } catch {
+          // Never leak tokens or error internals to the client.
+          return redirect(res, "/?error=login");
+        }
+      }
+
+      if (IS_REAL && method === "GET" && pathname === "/logout") {
+        const sid = parseCookies(req).sid;
+        if (sid) realSessions.delete(sid);
+        res.setHeader(
+          "set-cookie",
+          "sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+        );
+        return redirect(res, "/");
+      }
+
       // --- Session -------------------------------------------------------
       if (method === "GET" && pathname === "/api/session") {
-        return sendJson(res, 200, { user: currentUser(req) });
+        return sendJson(res, 200, { user: currentUser(req), mode: DEMO_MODE });
       }
 
       if (method === "POST" && pathname === "/api/login") {
+        // Demo identity switcher is sim-only; disabled in real mode.
+        if (IS_REAL) return sendJson(res, 404, { error: "not found" });
         const body = await readBody(req);
         const role = body && body.role;
         const user = DEMO_USERS[role];
