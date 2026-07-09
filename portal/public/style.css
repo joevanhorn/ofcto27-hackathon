@@ -1,3 +1,7 @@
+/* The hidden attribute must always win over class display rules (e.g. .banner
+   sets display:flex, which otherwise leaves the guardrail banner always visible). */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #0f1523;
   --bg-grad-1: #131b2e;
