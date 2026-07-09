@@ -51,6 +51,10 @@ function runApply(stateFile, env, onLine) {
     "-auto-approve",
     "-no-color",
     "-input=false",
+    // Passes are strictly sequential (single writer, local per-spoke state), so
+    // disable locking — otherwise pass N+1 can block on a lock pass N hasn't yet
+    // released, which intermittently stalled the federation converge loop.
+    "-lock=false",
     `-state=${stateFile}`,
   ];
 

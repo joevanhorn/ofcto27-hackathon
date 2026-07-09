@@ -33,7 +33,7 @@ const clickVerify = (page) =>
   page.getByRole("button", { name: /verify|sign in|next/i }).first().click({ timeout: 8000 })
     .catch(async () => { await page.locator('input[type="submit"]').first().click().catch(() => {}); });
 
-export async function oktaLogin(page, { user, pass, totpSecret, onStage = () => {} }) {
+export async function oktaLogin(page, { user, pass, totpSecret, doneUrl = /localhost:3000/, onStage = () => {} }) {
   // 1) identifier
   const id = page.locator('input[name="identifier"], input[autocomplete="username"]').first();
   await id.waitFor({ timeout: 20000 });
@@ -54,10 +54,10 @@ export async function oktaLogin(page, { user, pass, totpSecret, onStage = () => 
   // 3) second factor (TOTP) — chooser (if shown), then the code field
   if (totpSecret) {
     await Promise.race([
-      page.waitForURL(/localhost:3000/, { timeout: 8000 }).catch(() => {}),
+      page.waitForURL(doneUrl, { timeout: 8000 }).catch(() => {}),
       page.getByText(/enter a code|enter code/i).first().waitFor({ timeout: 10000 }).catch(() => {}),
     ]);
-    if (!page.url().includes("localhost:3000")) {
+    if (!doneUrl.test(page.url())) {
       if (await onChooser(page)) { await chooseMethod(page, /enter a code|okta verify/i); }
       const code = page.getByRole("textbox").first();
       await code.waitFor({ timeout: 10000 });
@@ -66,6 +66,6 @@ export async function oktaLogin(page, { user, pass, totpSecret, onStage = () => 
       await clickVerify(page);
     }
   }
-  await page.waitForURL(/localhost:3000/, { timeout: 25000 });
+  await page.waitForURL(doneUrl, { timeout: 25000 }).catch(() => {});
   await page.waitForLoadState("networkidle").catch(() => {});
 }
