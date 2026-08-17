@@ -702,3 +702,14 @@ select {
 }
 .chat-input input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .chat-input .btn { padding: 9px 14px; font-size: 13.5px; }
+
+/* ---------- Demo reset button ---------- */
+.pool-cluster { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn-reset {
+  background: rgba(255,255,255,0.06);
+  color: #dfe4f3;
+  border-color: rgba(255,255,255,0.18);
+  font-size: 13px;
+  padding: 8px 14px;
+}
+.btn-reset:hover:not(:disabled) { background: rgba(255,255,255,0.14); color: #fff; }

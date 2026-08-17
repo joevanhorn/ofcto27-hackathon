@@ -12,6 +12,7 @@ const API = {
   requests: "/api/requests",
   myOrgs: "/api/my-orgs",
   pool: "/api/pool",
+  poolReset: "/api/pool/reset",
   chat: "/api/chat",
 };
 
@@ -215,6 +216,7 @@ function onIdentityChange() {
   }
   refreshMyOrgs();
   refreshChatToggle();
+  refreshPool();
 }
 
 // Hide plan/result/guardrail — used on identity change.
@@ -709,10 +711,47 @@ function wireChat() {
 }
 
 // ---------------------------------------------------------------------------
+// Demo reset button
+// ---------------------------------------------------------------------------
+async function onResetDemo() {
+  if (!window.confirm("Reset the demo? This wipes everything the portal created on every org and returns them to the blank pool.")) {
+    return;
+  }
+  const btn = $("#reset-btn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Resetting…';
+
+  const { status, body } = await jsonFetch(API.poolReset, { method: "POST" });
+
+  btn.disabled = false;
+  btn.innerHTML = "&#8635; Reset demo";
+
+  if (status !== 200 || !body) {
+    toast((body && body.error) || "Reset failed.", true);
+    return;
+  }
+  if (!body.clean) {
+    toast("Reset ran, but at least one org is not fully clean — check the server log.", true);
+  } else {
+    toast("Demo reset — all orgs back in the pool.");
+  }
+  resetFlowPanels();
+  state.chatHistory = [];
+  const chatBox = $("#chat-messages");
+  if (chatBox) {
+    while (chatBox.children.length > 1) chatBox.removeChild(chatBox.lastChild);
+  }
+  refreshPool();
+  refreshMyOrgs();
+}
+
+// ---------------------------------------------------------------------------
 // Pre-warmed pool badge
 // ---------------------------------------------------------------------------
 async function refreshPool() {
   const badge = $("#pool-badge");
+  const resetBtn = $("#reset-btn");
+  if (resetBtn) resetBtn.hidden = !state.user;
   if (!badge) return;
   const { status, body } = await jsonFetch(API.pool);
   if (status !== 200 || !body) {
@@ -809,6 +848,7 @@ function wireEvents() {
   $("#template-select").addEventListener("change", renderTemplateDetails);
   $("#preview-btn").addEventListener("click", onPreview);
   $("#provision-btn").addEventListener("click", onProvision);
+  $("#reset-btn").addEventListener("click", onResetDemo);
   // Any form edit invalidates a stale preview so the user re-previews.
   $("#request-form").addEventListener("input", (e) => {
     if (e.target.id === "template-select") return;

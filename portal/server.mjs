@@ -26,6 +26,7 @@ import {
 import { provisionSpoke, subdomainOf, TERRAFORM_DIR } from "./src/provision.mjs";
 import { createCertificationCampaign } from "./src/governance.mjs";
 import { chatApiKey, runChat } from "./src/chat.mjs";
+import { resetPool } from "./src/reset.mjs";
 
 // Chat assistant availability: key comes from env or the gitignored creds
 // file, in both sim and real mode. Never sent to the client.
@@ -567,6 +568,58 @@ export function createServer() {
       // --- Pool status (the pre-warmed org count badge) --------------------
       if (method === "GET" && pathname === "/api/pool") {
         return sendJson(res, 200, poolStatus());
+      }
+
+      // --- Full demo reset (the between-takes button) ----------------------
+      // Real mode: API-level teardown of everything the portal created on
+      // every spoke (and the hub-side federation apps), then clear in-memory
+      // claims/jobs/orgs so the pool reads fully blank without a restart.
+      // Sim mode: re-blank the in-memory pool.
+      if (method === "POST" && pathname === "/api/pool/reset") {
+        const user = currentUser(req);
+        if (!user) return sendJson(res, 401, { error: "not authenticated" });
+
+        if (!IS_REAL) {
+          for (const org of pool) {
+            org.status = "blank";
+            org.ownerId = null;
+            org.name = null;
+            org.template = null;
+            org.options = undefined;
+            org.resolved = undefined;
+            org.federation = "pending";
+            org.createdAt = null;
+          }
+          return sendJson(res, 200, { clean: true, lines: ["sim pool re-blanked"], pool: poolStatus() });
+        }
+
+        // Refuse while a provision is running — tearing the org down under a
+        // live terraform apply would strand the demo mid-stream.
+        for (const job of jobs.values()) {
+          if (!job.done) {
+            return sendJson(res, 409, { error: "a provision is still running — wait for it to finish" });
+          }
+        }
+
+        const lines = [];
+        try {
+          const hub = REAL.hub && REAL.hub.apiToken
+            ? { domain: `${REAL.hub.orgName}.${REAL.hub.baseUrl}`, token: REAL.hub.apiToken }
+            : null;
+          const { clean, results } = await resetPool(REAL.spokes, hub, (l) => lines.push(l));
+          // Return cleaned orgs to the in-memory pool.
+          for (const r of results) {
+            if (r.clean) claimed.delete(r.subdomain);
+          }
+          for (let i = orgs.length - 1; i >= 0; i--) {
+            if (results.some((r) => r.clean && r.subdomain === orgs[i].id)) orgs.splice(i, 1);
+          }
+          jobs.clear();
+          return sendJson(res, 200, { clean, lines, pool: poolStatus() });
+        } catch (e) {
+          console.error("[reset]", e && e.message);
+          return sendJson(res, 500, { error: "reset failed", lines });
+        }
       }
 
       // --- Templates -----------------------------------------------------

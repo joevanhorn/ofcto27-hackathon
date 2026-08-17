@@ -129,6 +129,48 @@ test("pool endpoint reports ready count and decrements on claim", async () => {
   }
 });
 
+test("pool reset re-blanks claimed orgs (sim)", async () => {
+  const { base, close } = await startEphemeral();
+  try {
+    const client = makeClient(base);
+    await client("/api/login", {
+      method: "POST",
+      body: JSON.stringify({ role: "lead" }),
+    });
+    await client("/api/requests", {
+      method: "POST",
+      body: JSON.stringify({ name: "Reset Test", templateId: "standard-division", options: {} }),
+    });
+
+    let pool = await (await client("/api/pool")).json();
+    assert.equal(pool.ready, pool.total - 1);
+
+    const resetRes = await client("/api/pool/reset", { method: "POST" });
+    assert.equal(resetRes.status, 200);
+    const reset = await resetRes.json();
+    assert.equal(reset.clean, true);
+
+    pool = await (await client("/api/pool")).json();
+    assert.equal(pool.ready, pool.total, "all orgs blank again after reset");
+
+    const mine = await (await client("/api/my-orgs")).json();
+    assert.equal(mine.orgs.length, 0, "reset clears owned orgs");
+  } finally {
+    await close();
+  }
+});
+
+test("pool reset requires authentication", async () => {
+  const { base, close } = await startEphemeral();
+  try {
+    const client = makeClient(base);
+    const res = await client("/api/pool/reset", { method: "POST" });
+    assert.equal(res.status, 401);
+  } finally {
+    await close();
+  }
+});
+
 test("resolved template spec drives the provisioning plan", async () => {
   const { base, close } = await startEphemeral();
   try {
