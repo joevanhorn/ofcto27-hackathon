@@ -50,7 +50,14 @@ output "idp_acs_url" {
 
 output "idp_audience" {
   description = "Audience restriction / Entity ID (SP mode)"
-  value       = local.create_sp_resources ? local.this_org_audience : null
+  # The REAL audience Okta assigns the external IdP (opaque, e.g.
+  # https://www.okta.com/saml2/service-provider/<id>). The hand-constructed
+  # org URL is only a fallback before the IdP exists — assertions sent with it
+  # are rejected with GENERAL_NONSUCCESS, so the IdP-side app must be converged
+  # onto this value.
+  value = local.create_idp_saml ? okta_idp_saml.federation[0].audience : (
+    local.create_sp_resources ? local.this_org_audience : null
+  )
 }
 
 output "idp_metadata_url" {
@@ -83,6 +90,11 @@ output "federation_issuer" {
 output "federation_sso_url" {
   description = "SSO URL (IdP mode) - where SP sends AuthnRequests"
   value       = local.create_app_saml ? "https://${var.okta_org_name}.${var.okta_base_url}/app/${okta_app_saml.federation[0].name}/${okta_app_saml.federation[0].id}/sso/saml" : null
+}
+
+output "federation_embed_url" {
+  description = "IdP-initiated launch URL (IdP mode) — the app's embed link. Use THIS for hub-initiated SSO; federation_sso_url is the AuthnRequest endpoint and 404s when opened directly."
+  value       = local.create_app_saml ? okta_app_saml.federation[0].embed_url : null
 }
 
 output "federation_metadata_url" {

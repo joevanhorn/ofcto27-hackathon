@@ -24,6 +24,7 @@ import {
   spokePool,
 } from "./src/config.mjs";
 import { provisionSpoke, subdomainOf } from "./src/provision.mjs";
+import { createCertificationCampaign } from "./src/governance.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -221,6 +222,19 @@ function dataRegion(options) {
 }
 
 const REAL = IS_REAL ? buildRealConfig() : null;
+
+// Realms are feature-gated on trial orgs: probe the spoke before the apply so
+// terraform only creates them where they can exist (explicit skip otherwise).
+async function orgSupportsRealms(spoke) {
+  try {
+    const r = await fetch(`https://${spoke.domain}/api/v1/realms?limit=1`, {
+      headers: { authorization: sswsHeader(spoke.token), accept: "application/json" },
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
 
 // Fetch real Okta group membership for a user and return the group names.
 async function fetchGroupNames(sub) {
@@ -483,51 +497,77 @@ export function createServer() {
           jobs.set(jobId, job);
 
           // Fire the apply asynchronously; the client watches it over SSE.
-          provisionSpoke({
-            spoke,
-            hub: REAL.hub, // hub creds always (provider init); federation gated:
-            // DEMO_FEDERATION=off -> baseline-only + pre-staged SSO URL.
-            federation: REAL.federationInProvision,
-            vars: {
-              org_display_name: name,
-              template_id: templateId,
-              retention_days: retentionDays(options),
-              data_region: dataRegion(options),
-              deploy_apps: resolved.apps,
-              realm_names: resolved.realms,
-            },
-            onLine: (line) => job.lines.push(line),
-          })
-            .then((r) => {
-              if (r.ok) {
-                const outputs = r.outputs || {};
-                const orgRecord = {
-                  id: spoke.subdomain,
-                  name,
-                  template: templateId,
-                  status: "claimed",
-                  federation: "federated",
-                  ownerId: user.id,
-                  login_url: outputs.spoke_login_url || null,
-                  // "Open (SSO)" deep-links to the federated hub launch, not the
-                  // bare spoke login — this is the hub-as-IdP hero moment.
-                  sso_entry_url: outputs.hub_sso_entry_url || REAL.ssoEntryUrl || null,
-                  hub_app_id: outputs.hub_app_id || null,
-                };
-                orgs.push(orgRecord);
-                job.result = {
-                  org: orgRecord,
-                  plan: outputs.applied_summary || [],
-                };
-              } else {
-                job.result = { error: "provisioning failed", code: r.code };
-              }
-              job.done = true;
-            })
-            .catch((e) => {
-              job.result = { error: "provisioning failed", detail: String(e && e.message) };
-              job.done = true;
+          (async () => {
+            // Feature-gate realms per org BEFORE the apply (explicit skip line).
+            const realmsOk =
+              resolved.realms.length > 0 ? await orgSupportsRealms(spoke) : false;
+            if (resolved.realms.length && !realmsOk) {
+              job.lines.push(
+                ">> realms: skipped — the Realms feature is not available on this org"
+              );
+            }
+
+            const r = await provisionSpoke({
+              spoke,
+              hub: REAL.hub, // hub creds always (provider init); federation gated:
+              // DEMO_FEDERATION=off -> baseline-only + pre-staged SSO URL.
+              federation: REAL.federationInProvision,
+              vars: {
+                org_display_name: name,
+                template_id: templateId,
+                retention_days: retentionDays(options),
+                data_region: dataRegion(options),
+                deploy_apps: resolved.apps,
+                realm_names: resolved.realms,
+                enable_realms: realmsOk,
+              },
+              onLine: (line) => job.lines.push(line),
             });
+
+            if (r.ok) {
+              const outputs = r.outputs || {};
+
+              // Post-apply governance: recurring access certification campaign.
+              const campaign = await createCertificationCampaign({
+                domain: spoke.domain,
+                token: spoke.token,
+                groupId: outputs.baseline_group_id,
+                orgDisplayName: name,
+                campaign: resolved.campaign,
+                onLine: (line) => job.lines.push(line),
+              });
+
+              const plan = [...(outputs.applied_summary || [])];
+              plan.push(
+                campaign.status === "scheduled"
+                  ? `Scheduled ${campaign.cadence} access certification campaign`
+                  : `Certification campaign skipped — ${campaign.reason}`
+              );
+
+              const orgRecord = {
+                id: spoke.subdomain,
+                name,
+                template: templateId,
+                status: "claimed",
+                federation: "federated",
+                ownerId: user.id,
+                login_url: outputs.spoke_login_url || null,
+                // "Open (SSO)" deep-links to the federated hub launch, not the
+                // bare spoke login — this is the hub-as-IdP hero moment.
+                sso_entry_url: outputs.hub_sso_entry_url || REAL.ssoEntryUrl || null,
+                hub_app_id: outputs.hub_app_id || null,
+                campaign,
+              };
+              orgs.push(orgRecord);
+              job.result = { org: orgRecord, plan };
+            } else {
+              job.result = { error: "provisioning failed", code: r.code };
+            }
+            job.done = true;
+          })().catch((e) => {
+            job.result = { error: "provisioning failed", detail: String(e && e.message) };
+            job.done = true;
+          });
 
           return sendJson(res, 200, { jobId });
         }

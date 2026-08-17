@@ -11,6 +11,11 @@ output "baseline_group" {
   value       = okta_group.baseline_users.name
 }
 
+output "baseline_group_id" {
+  description = "ID of the baseline group (certification campaign target)"
+  value       = okta_group.baseline_users.id
+}
+
 output "baseline_app" {
   description = "Baseline app assigned to spoke users"
   value       = okta_app_bookmark.welcome.label
@@ -18,11 +23,29 @@ output "baseline_app" {
 
 output "applied_summary" {
   description = "Plain-language summary of the baseline applied"
-  value = [
-    "Created baseline group '${okta_group.baseline_users.name}'",
-    "Assigned app '${okta_app_bookmark.welcome.label}' to baseline users",
-    "Template '${var.template_id}' — retention ${var.retention_days}d, region ${var.data_region}",
-  ]
+  value = concat(
+    [
+      "Created baseline group '${okta_group.baseline_users.name}'",
+      "Assigned app '${okta_app_bookmark.welcome.label}' to baseline users",
+    ],
+    [for app in okta_app_bookmark.deployed : "Deployed app '${app.label}' and assigned it to baseline users"],
+    length(okta_realm.template) > 0
+      ? [for r in okta_realm.template : "Created realm '${r.name}' (${r.realm_type})"]
+      : (length(var.realm_names) > 0 ? ["Realms skipped — feature not available on this org"] : []),
+    [
+      "Template '${var.template_id}' — retention ${var.retention_days}d, region ${var.data_region}",
+    ]
+  )
+}
+
+output "deployed_app_ids" {
+  description = "IDs of the template-deployed bookmark apps, keyed by catalog id"
+  value       = { for k, app in okta_app_bookmark.deployed : k => app.id }
+}
+
+output "realm_ids" {
+  description = "IDs of the created realms, keyed by name"
+  value       = { for k, r in okta_realm.template : k => r.id }
 }
 
 # -----------------------------------------------------------------------------
@@ -65,9 +88,11 @@ output "spoke_acs_url" {
 }
 
 # The federated launch URL the portal 'Open (SSO)' button deep-links to.
+# Embed link, NOT federation_sso_url — the latter is the AuthnRequest endpoint
+# and 404s when a browser opens it directly.
 output "hub_sso_entry_url" {
   description = "Hub IdP-initiated SSO launch URL for the spoke app"
-  value       = try(module.hub_federation[0].federation_sso_url, "")
+  value       = try(module.hub_federation[0].federation_embed_url, "")
 }
 
 output "spoke_audience" {

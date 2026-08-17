@@ -42,6 +42,32 @@ variable "data_region" {
   default     = "us"
 }
 
+# Resolved template spec: apps to deploy (baseline + chosen add-ons). The
+# portal passes this as JSON via TF_VAR_deploy_apps.
+variable "deploy_apps" {
+  description = "Bookmark apps to create and assign to Baseline-Users"
+  type = list(object({
+    id    = string
+    label = string
+    url   = string
+  }))
+  default = []
+}
+
+# Realms are feature-gated on trial orgs; the portal probes the spoke's
+# /api/v1/realms at claim time and only enables when supported.
+variable "enable_realms" {
+  description = "Create the template's realms (org must support the Realms feature)"
+  type        = bool
+  default     = false
+}
+
+variable "realm_names" {
+  description = "Realm names from the resolved template (e.g. [\"Employees\", \"Partners\"])"
+  type        = list(string)
+  default     = []
+}
+
 # -----------------------------------------------------------------------------
 # SAML Org2Org federation (hub IdP -> spoke SP)
 # -----------------------------------------------------------------------------

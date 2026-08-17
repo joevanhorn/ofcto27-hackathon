@@ -61,6 +61,17 @@ function runApply(stateFile, env, onLine) {
   return new Promise((resolve) => {
     const child = spawn("terraform", applyArgs, { cwd: TERRAFORM_DIR, env });
 
+    // Stall heartbeat: if terraform goes quiet (provider retry/backoff, rate
+    // limiting), keep the live console honest instead of looking frozen.
+    let lastOutput = Date.now();
+    const heartbeat = setInterval(() => {
+      const quiet = Math.round((Date.now() - lastOutput) / 1000);
+      if (quiet >= 20) {
+        onLine(`… still applying (${quiet}s without output — provider retry/backoff likely)`);
+        lastOutput = Date.now(); // throttle: one heartbeat per quiet window
+      }
+    }, 5000);
+
     // Line splitter shared across stdout+stderr so a callback fires per line as
     // soon as a newline arrives (not buffered until process exit).
     const makeSplitter = () => {
@@ -88,16 +99,18 @@ function runApply(stateFile, env, onLine) {
     const err = makeSplitter();
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (c) => out.push(c));
-    child.stderr.on("data", (c) => err.push(c));
+    child.stdout.on("data", (c) => { lastOutput = Date.now(); out.push(c); });
+    child.stderr.on("data", (c) => { lastOutput = Date.now(); err.push(c); });
 
     child.on("error", (e) => {
       // e.g. terraform not on PATH. Surface a line but never a token.
+      clearInterval(heartbeat);
       onLine(`error: failed to launch terraform (${e && e.message})`);
       resolve({ ok: false, code: null });
     });
 
     child.on("close", (code) => {
+      clearInterval(heartbeat);
       out.flush();
       err.flush();
       resolve({ ok: code === 0, code });
@@ -166,6 +179,7 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, federation 
   // Cross-org carriers, threaded pass-to-pass. Seed from any existing state so
   // idempotent re-runs converge immediately instead of restarting from PENDING.
   let spokeAcs = `https://${subdomain}.${baseUrl}/sso/saml2/PENDING`;
+  let spokeAudience = ""; // REAL opaque SP entity ID from okta_idp_saml — hub must send this
   let hubIssuer = "";
   let hubSso = "";
   let hubCert = "";
@@ -178,6 +192,7 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, federation 
       if (seed.spoke_idp_id) {
         spokeAcs = `https://${subdomain}.${baseUrl}/sso/saml2/${seed.spoke_idp_id}`;
       }
+      if (seed.spoke_audience) spokeAudience = seed.spoke_audience;
     } catch {
       /* no prior state — start from PENDING */
     }
@@ -185,16 +200,20 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, federation 
 
   const passes = federationEnabled ? 3 : 1;
   let out = {};
+  let converged = !federationEnabled;
   for (let pass = 1; pass <= passes; pass++) {
     // Feed the current carrier values into this apply.
     env.TF_VAR_spoke_acs_url = spokeAcs;
+    env.TF_VAR_spoke_audience = spokeAudience;
     env.TF_VAR_hub_issuer = hubIssuer;
     env.TF_VAR_hub_sso_url = hubSso;
     env.TF_VAR_hub_certificate = hubCert; // env only — never onLine
 
     if (passes > 1) onLine(`>> federation converge pass ${pass}/${passes}`);
 
+    const t0 = Date.now();
     const r = await runApply(stateFile, env, onLine);
+    onLine(`>> pass ${pass} apply finished in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
     if (!r.ok) return { ok: false, code: r.code };
 
     try {
@@ -210,20 +229,30 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, federation 
     hubSso = out.hub_sso_url || hubSso;
     hubCert = out.hub_certificate || hubCert;
     const fedAcs = spokeAcs; // the ACS the hub app was configured with this pass
+    const fedAud = spokeAudience; // the audience it was configured with this pass
     if (out.spoke_idp_id) {
       spokeAcs = `https://${subdomain}.${baseUrl}/sso/saml2/${out.spoke_idp_id}`;
     }
-    // Converged once the hub app has real creds AND was applied with the real
-    // spoke ACS (fedAcs === spokeAcs) — otherwise the hub still points at the
-    // PENDING placeholder and another pass is required.
+    if (out.spoke_audience) spokeAudience = out.spoke_audience;
+    // Converged once the hub app has real creds AND was applied with BOTH the
+    // real spoke ACS and the real (opaque) spoke audience — an assertion sent
+    // with the hand-constructed org-URL audience is rejected by the spoke with
+    // GENERAL_NONSUCCESS, so audience convergence is mandatory, not cosmetic.
     if (
       hubCert &&
       out.spoke_idp_id &&
       out.spoke_acs_url === spokeAcs &&
-      fedAcs === spokeAcs
+      fedAcs === spokeAcs &&
+      spokeAudience &&
+      fedAud === spokeAudience
     ) {
+      converged = true;
       break;
     }
+  }
+
+  if (!converged) {
+    onLine(">> warning: federation did not fully converge — hub app may still send a placeholder ACS/audience; re-run to converge");
   }
 
   return { ok: true, outputs: out };
