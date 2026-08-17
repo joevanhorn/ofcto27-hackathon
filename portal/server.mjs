@@ -14,7 +14,7 @@ import crypto from "node:crypto";
 import { authorizeRequest } from "./src/authz.mjs";
 import { claimOrg } from "./src/pool.mjs";
 import { listMyOrgs } from "./src/myorgs.mjs";
-import { DEMO_USERS, TEMPLATES, makePool } from "./src/data.mjs";
+import { APP_CATALOG, DEMO_USERS, TEMPLATES, makePool, resolveTemplate } from "./src/data.mjs";
 import {
   DEMO_MODE,
   IS_REAL,
@@ -137,14 +137,29 @@ function serveStatic(res, relPath) {
 }
 
 // Human-readable, control-transparent provisioning plan for a claimed org.
-function buildPlan(org, template, user) {
+// `resolved` is the concrete spec from resolveTemplate(): apps, realms, campaign.
+function buildPlan(org, template, user, resolved) {
   const controls = template.requiredControls.join(", ");
-  return [
+  const steps = [
     `Claim blank org ${org.id} from the pre-warmed pool`,
     `Apply the ${template.name} baseline — enforces: ${controls}`,
-    "Federate to the hub via SAML Org2Org (hub is IdP)",
-    `Assign ${user.name} as scoped owner of ${org.id} only — no hub access`,
   ];
+  if (resolved) {
+    if (resolved.apps.length) {
+      steps.push(`Deploy applications: ${resolved.apps.map((a) => a.label).join(", ")}`);
+    }
+    if (resolved.realms.length) {
+      steps.push(`Create realm${resolved.realms.length > 1 ? "s" : ""}: ${resolved.realms.join(", ")}`);
+    }
+    if (resolved.campaign) {
+      steps.push(`Schedule a ${resolved.campaign.cadence} access certification campaign ("${resolved.campaign.name}")`);
+    }
+  }
+  steps.push(
+    "Federate to the hub via SAML Org2Org (hub is IdP)",
+    `Assign ${user.name} as scoped owner of ${org.id} only — no hub access`
+  );
+  return steps;
 }
 
 function redirect(res, location) {
@@ -416,7 +431,7 @@ export function createServer() {
 
       // --- Templates -----------------------------------------------------
       if (method === "GET" && pathname === "/api/templates") {
-        return sendJson(res, 200, { templates: TEMPLATES });
+        return sendJson(res, 200, { templates: TEMPLATES, appCatalog: APP_CATALOG });
       }
 
       // --- Provisioning request -----------------------------------------
@@ -453,6 +468,7 @@ export function createServer() {
 
           const name = (body && body.name) || `${template.name} spoke`;
           const options = (body && body.options) || {};
+          const resolved = resolveTemplate(template, options);
           const jobId = crypto.randomUUID();
           const job = {
             lines: [],
@@ -462,6 +478,7 @@ export function createServer() {
             user,
             name,
             templateId,
+            resolved,
           };
           jobs.set(jobId, job);
 
@@ -476,6 +493,8 @@ export function createServer() {
               template_id: templateId,
               retention_days: retentionDays(options),
               data_region: dataRegion(options),
+              deploy_apps: resolved.apps,
+              realm_names: resolved.realms,
             },
             onLine: (line) => job.lines.push(line),
           })
@@ -528,10 +547,11 @@ export function createServer() {
         org.name = (body && body.name) || `${template.name} spoke`;
         org.template = templateId;
         org.options = (body && body.options) || {};
+        org.resolved = resolveTemplate(template, org.options);
         org.federation = "federated";
         org.createdAt = new Date().toISOString();
 
-        const plan = buildPlan(org, template, user);
+        const plan = buildPlan(org, template, user, org.resolved);
         return sendJson(res, 200, { org, plan });
       }
 
@@ -642,7 +662,7 @@ export function start(port = process.env.PORT || 3000) {
   server.listen(port, () => {
     const addr = server.address();
     const shown = addr && typeof addr === "object" ? addr.port : port;
-    console.log(`Spoke-provisioning portal listening on http://localhost:${shown}`);
+    console.log(`Org Factory portal listening on http://localhost:${shown}`);
   });
   return server;
 }

@@ -148,6 +148,10 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, federation 
     TF_VAR_template_id: vars.template_id || "standard-spoke",
     TF_VAR_retention_days: String(vars.retention_days || "90"),
     TF_VAR_data_region: vars.data_region || "us",
+    // Concrete template spec (resolved server-side): bookmark apps + realms.
+    TF_VAR_deploy_apps: JSON.stringify(vars.deploy_apps || []),
+    TF_VAR_realm_names: JSON.stringify(vars.realm_names || []),
+    TF_VAR_enable_realms: vars.enable_realms ? "true" : "false",
     TF_VAR_enable_federation: federationEnabled ? "true" : "false",
   };
   // Hub creds are set whenever available — the aliased okta.hub PROVIDER must

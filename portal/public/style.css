@@ -2,19 +2,20 @@
    sets display:flex, which otherwise leaves the guardrail banner always visible). */
 [hidden] { display: none !important; }
 
+/* Accenture demo theme: black-on-white surfaces, core purple #A100FF accents. */
 :root {
-  --bg: #0f1523;
-  --bg-grad-1: #131b2e;
-  --bg-grad-2: #0c111d;
+  --bg: #0e0a14;
+  --bg-grad-1: #18102a;
+  --bg-grad-2: #0a0711;
   --surface: #ffffff;
   --surface-muted: #f4f6fb;
   --border: #e2e6ef;
   --text: #1a2233;
   --text-soft: #5b6577;
   --text-faint: #8a93a6;
-  --accent: #4f46e5;
-  --accent-dark: #4338ca;
-  --accent-soft: #eef0fe;
+  --accent: #a100ff;
+  --accent-dark: #7500c0;
+  --accent-soft: #f5e9ff;
   --success: #0f9d58;
   --success-soft: #e6f6ee;
   --success-border: #b6e3ca;
@@ -33,7 +34,7 @@ body {
   font-family: var(--font);
   color: var(--text);
   background:
-    radial-gradient(1200px 600px at 15% -10%, rgba(79,70,229,0.12) 0, transparent 60%),
+    radial-gradient(1200px 600px at 15% -10%, rgba(161,0,255,0.14) 0, transparent 60%),
     linear-gradient(160deg, var(--bg-grad-1), var(--bg-grad-2));
   background-color: var(--bg);
   min-height: 100vh;
@@ -58,8 +59,8 @@ body {
   place-items: center;
   width: 46px; height: 46px;
   border-radius: 12px;
-  color: #c7ccf7;
-  background: linear-gradient(150deg, #262f4d, #1a2137);
+  color: #fff;
+  background: linear-gradient(150deg, var(--accent), var(--accent-dark));
   border: 1px solid rgba(255,255,255,0.08);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
@@ -110,7 +111,7 @@ body {
   display: grid; place-items: center;
   font-weight: 700; font-size: 13px;
   color: #fff;
-  background: linear-gradient(150deg, var(--accent), #7c6cf5);
+  background: linear-gradient(150deg, var(--accent), #c05cff);
 }
 .who.who-nonmember .avatar { background: linear-gradient(150deg, #8a93a6, #6b7488); }
 .who-text { text-align: left; line-height: 1.25; }
@@ -137,9 +138,9 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .btn-primary {
   background: linear-gradient(150deg, var(--accent), var(--accent-dark));
   color: #fff;
-  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 6px 16px rgba(161, 0, 255, 0.35);
 }
-.btn-primary:hover:not(:disabled) { box-shadow: 0 8px 20px rgba(79, 70, 229, 0.45); }
+.btn-primary:hover:not(:disabled) { box-shadow: 0 8px 20px rgba(161, 0, 255, 0.45); }
 
 .btn-secondary {
   background: var(--surface-muted);
@@ -522,3 +523,49 @@ select {
   animation: blink 1s steps(1) infinite;
 }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* ---------- Accenture brand header ---------- */
+.brand-word { font-weight: 800; letter-spacing: -0.02em; text-transform: lowercase; }
+.brand-sep { color: var(--accent); font-weight: 800; margin: 0 2px; }
+
+/* ---------- Baseline chips (apps / realms / campaign) ---------- */
+.chip-app { border-left: 3px solid var(--accent); }
+.chip-realm { border-left: 3px solid #00baff; }
+.chip-campaign { border-left: 3px solid var(--success); }
+
+/* ---------- New option controls ---------- */
+.field-wide { grid-column: 1 / -1; }
+
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.check:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+.check input { accent-color: var(--accent); margin: 0; }
+
+.field-toggle {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 10px;
+}
+.field-toggle input { accent-color: var(--accent); width: 17px; height: 17px; margin: 0; }
+.field-toggle .field-label { margin: 0; }

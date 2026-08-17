@@ -3,25 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Spoke Provisioning Portal</title>
+  <title>Accenture Org Factory</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 4l12 8-12 8' fill='none' stroke='%23A100FF' stroke-width='4.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 <header class="topbar">
   <div class="brand">
     <span class="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3.2"></circle>
-        <circle cx="4.5" cy="5" r="1.8"></circle>
-        <circle cx="19.5" cy="5" r="1.8"></circle>
-        <circle cx="4.5" cy="19" r="1.8"></circle>
-        <circle cx="19.5" cy="19" r="1.8"></circle>
-        <path d="M6 6.2 10 10M18 6.2 14 10M6 17.8 10 14M18 17.8 14 14"></path>
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 4l12 8-12 8"></path>
       </svg>
     </span>
     <div class="brand-text">
-      <h1>Spoke Provisioning Portal</h1>
-      <p class="tagline">Governed self-service &mdash; hub-and-spoke Okta org provisioning</p>
+      <h1><span class="brand-word">accenture</span> <span class="brand-sep">/</span> Org Factory</h1>
+      <p class="tagline">Governed self-service &mdash; provision a compliant Okta org in minutes</p>
     </div>
   </div>
 
@@ -34,16 +30,16 @@
 </header>
 
 <main class="layout">
-  <!-- LEFT: request a spoke -->
+  <!-- LEFT: request an org -->
   <section class="card" id="request-card">
     <div class="card-head">
-      <h2><span class="step-num">1</span> Request a spoke</h2>
+      <h2><span class="step-num">1</span> Request an org</h2>
       <p class="card-sub">Every option is a closed choice &mdash; no free-text, so no misconfiguration.</p>
     </div>
 
     <div id="signed-out-notice" class="notice notice-muted">
       <span class="notice-icon" aria-hidden="true">&#128274;</span>
-      <span>Sign in as a demo identity above to request a spoke org.</span>
+      <span>Sign in as a demo identity above to request a new org.</span>
     </div>
 
     <form id="request-form" class="form" hidden>
@@ -64,12 +60,17 @@
         <div id="controls-chips" class="chips" aria-live="polite"></div>
       </div>
 
+      <div class="field">
+        <span class="field-label">Included in this template</span>
+        <div id="baseline-chips" class="chips" aria-live="polite"></div>
+      </div>
+
       <div id="options-fields" class="options-grid"></div>
 
       <div class="actions">
         <button type="button" id="preview-btn" class="btn btn-secondary">Preview plan</button>
         <button type="button" id="provision-btn" class="btn btn-primary" hidden>
-          <span class="btn-label">Provision spoke</span>
+          <span class="btn-label">Provision org</span>
         </button>
       </div>
     </form>
@@ -97,7 +98,7 @@
     <section class="card terraform-card" id="terraform-card" hidden>
       <div class="card-head">
         <h2><span class="step-num">2</span> Provisioning &mdash; terraform</h2>
-        <p class="card-sub">Live <code>terraform apply</code> against the claimed spoke org.</p>
+        <p class="card-sub">Live <code>terraform apply</code> against the claimed org.</p>
       </div>
       <div class="term" id="terraform-console" aria-live="polite">
         <div class="term-bar">
@@ -112,7 +113,7 @@
 
     <section class="card card-success" id="result-card" hidden>
       <div class="card-head">
-        <h2><span class="success-check" aria-hidden="true">&#10003;</span> Spoke provisioned</h2>
+        <h2><span class="success-check" aria-hidden="true">&#10003;</span> Org provisioned</h2>
         <p class="card-sub" id="result-sub"></p>
       </div>
       <ol id="result-plan" class="plan-list plan-done"></ol>
@@ -121,7 +122,7 @@
     <section class="card" id="orgs-card">
       <div class="card-head">
         <h2><span class="step-num">3</span> My orgs</h2>
-        <p class="card-sub">You see only the spokes you own. Open one with hub SSO &mdash; no new password.</p>
+        <p class="card-sub">You see only the orgs you own. Open one with hub SSO &mdash; no new password.</p>
       </div>
       <div id="orgs-list" class="orgs-list">
         <div class="empty">Nothing yet.</div>

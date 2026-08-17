@@ -1,13 +1,14 @@
-// Seed data + template catalog for the self-service Okta spoke-provisioning portal.
+// Seed data + template catalog for the org-provisioning portal.
 //
-// Everything here is in-memory demo data. There are NO real Okta/AWS calls
-// anywhere in this portal — the identity login and SAML Org2Org federation are
-// simulated behind the API so the flow is demo-safe and deterministic.
+// Sim mode serves this data as-is with no Okta/AWS calls. Real mode maps the
+// same catalog onto terraform variables (apps, realms) and a Governance API
+// post-step (certification campaigns), so sim and real always tell the same
+// story.
 
-// Two demo identities the login screen can assume. In the real system these
-// arrive from an OIDC token; here we hard-code them. `groups` is what the
-// authorization gate (authz.mjs) keys on — "Division Leads" is the only group
-// that may initiate provisioning.
+// Two demo identities the sim login screen can assume. In real mode these
+// arrive from the hub's OIDC token; here we hard-code them. `groups` is what
+// the authorization gate (authz.mjs) keys on — "Division Leads" is the only
+// group that may initiate provisioning.
 export const DEMO_USERS = {
   lead: {
     id: "00uLEAD",
@@ -23,73 +24,215 @@ export const DEMO_USERS = {
   },
 };
 
+// Catalog of well-known applications a template can deploy (as bookmark apps
+// in the demo). Baseline apps are fixed per template; the rest are offered as
+// closed-choice add-ons — still no free text anywhere.
+export const APP_CATALOG = [
+  { id: "servicenow", label: "ServiceNow", url: "https://nav.service-now.com" },
+  { id: "workday", label: "Workday", url: "https://www.myworkday.com" },
+  { id: "salesforce", label: "Salesforce", url: "https://login.salesforce.com" },
+  { id: "jira", label: "Jira", url: "https://id.atlassian.com" },
+  { id: "confluence", label: "Confluence", url: "https://id.atlassian.com/login?application=confluence" },
+  { id: "m365", label: "Microsoft 365", url: "https://www.office.com" },
+];
+
+export function appById(id) {
+  return APP_CATALOG.find((a) => a.id === id) || null;
+}
+
+// Build a multi-select "additional applications" option from the catalog,
+// excluding the template's baseline apps (they always deploy).
+function addonAppsOption(excludeIds) {
+  return {
+    id: "addon_apps",
+    type: "multi",
+    label: "Additional applications",
+    choices: APP_CATALOG.filter((a) => !excludeIds.includes(a.id)).map((a) => ({
+      value: a.id,
+      label: a.label,
+    })),
+  };
+}
+
+const RETENTION_CHOICES = [
+  { value: "90d", label: "90 days" },
+  { value: "180d", label: "180 days" },
+  { value: "1y", label: "1 year" },
+];
+
+const REGION_OPTION = {
+  id: "region",
+  type: "select",
+  label: "Data residency region",
+  choices: [
+    { value: "US", label: "United States" },
+    { value: "EU", label: "European Union" },
+  ],
+};
+
 // Provisioning templates ("baselines"). Each template enforces a fixed set of
-// security controls and offers only deterministic, closed-choice options — no
-// free-text — so every provisioned spoke is uniform and auditable.
+// security controls, always deploys its `baseline` block (apps, realms, and a
+// recurring access-certification campaign), and offers only deterministic,
+// closed-choice customization — selects, multi-selects, and toggles. No free
+// text, so every provisioned org is uniform and auditable.
 export const TEMPLATES = [
   {
-    id: "standard-spoke",
-    name: "Standard Division Spoke",
+    id: "standard-division",
+    name: "Standard Division Org",
     description:
-      "General-purpose spoke org for a business division. Human sign-in is federation-only through the hub; local passwords are never issued.",
+      "General-purpose org for a business division. Human sign-in is federation-only through the hub; local passwords are never issued. Ships with the workforce app baseline and a quarterly access review.",
     requiredControls: [
       "Phishing-resistant MFA",
       "Federation-only human sign-in",
-      "Scoped admin role (spoke only)",
+      "Scoped admin role (this org only)",
       "Break-glass admin",
+      "Quarterly access certification",
     ],
+    baseline: {
+      apps: ["servicenow", "m365"],
+      realms: ["Employees"],
+      campaign: { cadence: "quarterly", name: "Baseline access review" },
+    },
     options: [
+      addonAppsOption(["servicenow", "m365"]),
       {
-        id: "retention",
-        label: "Log retention period",
-        choices: [
-          { value: "90d", label: "90 days" },
-          { value: "180d", label: "180 days" },
-          { value: "1y", label: "1 year" },
-        ],
+        id: "contractor_realm",
+        type: "toggle",
+        label: "Add a separate Contractors realm",
+        default: false,
+        realm: "Contractors",
       },
-      {
-        id: "region",
-        label: "Data residency region",
-        choices: [
-          { value: "US", label: "United States" },
-          { value: "EU", label: "European Union" },
-        ],
-      },
+      { id: "retention", type: "select", label: "Log retention period", choices: RETENTION_CHOICES },
+      REGION_OPTION,
     ],
   },
   {
-    id: "regulated-spoke",
-    name: "Regulated Division Spoke",
+    id: "regulated-client",
+    name: "Regulated / Client-Data Org",
     description:
-      "Hardened baseline for divisions handling regulated data. Same federation-only, scoped-admin controls plus longer default retention.",
+      "Hardened baseline for divisions handling regulated or client data. Same federation-only, scoped-admin controls plus mandatory long retention and a tighter certification cadence.",
     requiredControls: [
       "Phishing-resistant MFA",
       "Federation-only human sign-in",
-      "Scoped admin role (spoke only)",
+      "Scoped admin role (this org only)",
       "Break-glass admin",
+      "Recurring access certification",
+      "Extended audit retention",
     ],
+    baseline: {
+      apps: ["servicenow", "workday"],
+      realms: ["Employees"],
+      campaign: { cadence: "quarterly", name: "Regulated access review" },
+    },
     options: [
+      addonAppsOption(["servicenow", "workday"]),
+      {
+        id: "review_cadence",
+        type: "select",
+        label: "Access review cadence",
+        choices: [
+          { value: "quarterly", label: "Quarterly" },
+          { value: "monthly", label: "Monthly" },
+        ],
+      },
       {
         id: "retention",
+        type: "select",
         label: "Log retention period",
+        // Regulated orgs never get the short window.
+        choices: RETENTION_CHOICES.filter((c) => c.value !== "90d"),
+      },
+      REGION_OPTION,
+    ],
+  },
+  {
+    id: "partner-sandbox",
+    name: "Partner & Contractor Sandbox",
+    description:
+      "Collaboration org for external partners and contractors. Partners live in their own realm, get a limited app set, and every grant is re-certified monthly.",
+    requiredControls: [
+      "Phishing-resistant MFA",
+      "Federation-only human sign-in",
+      "Scoped admin role (this org only)",
+      "Break-glass admin",
+      "Monthly access certification",
+      "Partner realm isolation",
+    ],
+    baseline: {
+      apps: ["jira"],
+      realms: ["Partners"],
+      campaign: { cadence: "monthly", name: "Partner access review" },
+    },
+    options: [
+      {
+        id: "addon_apps",
+        type: "multi",
+        label: "Additional applications",
+        // Sandbox add-ons are deliberately limited — no HR/finance systems.
         choices: [
-          { value: "90d", label: "90 days" },
-          { value: "180d", label: "180 days" },
-          { value: "1y", label: "1 year" },
+          { value: "confluence", label: "Confluence" },
+          { value: "servicenow", label: "ServiceNow" },
         ],
       },
       {
-        id: "region",
-        label: "Data residency region",
-        choices: [
-          { value: "US", label: "United States" },
-          { value: "EU", label: "European Union" },
-        ],
+        id: "employee_realm",
+        type: "toggle",
+        label: "Add an internal Employees realm",
+        default: false,
+        realm: "Employees",
       },
+      {
+        id: "retention",
+        type: "select",
+        label: "Log retention period",
+        choices: RETENTION_CHOICES.filter((c) => c.value !== "1y"),
+      },
+      REGION_OPTION,
     ],
   },
 ];
+
+/**
+ * Resolve a template + the user's chosen options into the concrete spec that
+ * gets deployed: full app objects (baseline + add-ons), realm names (baseline
+ * + toggled), and the certification campaign. Single source of truth shared by
+ * plan builders (sim + real) and the real provisioning pipeline.
+ *
+ * @param {object} template - an entry from TEMPLATES
+ * @param {object} options - { [optionId]: value } — multi values are arrays
+ * @returns {{apps: Array<{id,label,url}>, realms: string[], campaign: {cadence, name}}}
+ */
+export function resolveTemplate(template, options = {}) {
+  const baseline = template.baseline || {};
+
+  const appIds = [...(baseline.apps || [])];
+  const addons = options.addon_apps;
+  for (const id of Array.isArray(addons) ? addons : []) {
+    // Only accept ids the template actually offered.
+    const offered = (template.options || []).some(
+      (o) => o.id === "addon_apps" && (o.choices || []).some((c) => c.value === id)
+    );
+    if (offered && !appIds.includes(id)) appIds.push(id);
+  }
+  const apps = appIds.map(appById).filter(Boolean);
+
+  const realms = [...(baseline.realms || [])];
+  for (const opt of template.options || []) {
+    if (opt.type === "toggle" && opt.realm) {
+      const v = options[opt.id];
+      if (v === true || v === "true" || v === "on") {
+        if (!realms.includes(opt.realm)) realms.push(opt.realm);
+      }
+    }
+  }
+
+  const campaign = { ...(baseline.campaign || { cadence: "quarterly", name: "Access review" }) };
+  if (options.review_cadence === "monthly" || options.review_cadence === "quarterly") {
+    campaign.cadence = options.review_cadence;
+  }
+
+  return { apps, realms, campaign };
+}
 
 // A fresh pool of pre-warmed blank spoke orgs. Returning a new array (with new
 // object literals) each call means each server instance / test gets an

@@ -1,4 +1,4 @@
-// Spoke Provisioning Portal — front-end controller.
+// Accenture Org Factory — front-end controller.
 // Plain vanilla JS, no build step, no dependencies. Talks only to the
 // same-origin backend API described in the story contract.
 
@@ -20,8 +20,14 @@ const CREDS = { credentials: "same-origin" };
 const state = {
   user: null,
   templates: [],
+  appCatalog: [], // bookmark-app catalog, for labeling baseline/add-on apps
   mode: "sim", // "sim" | "real" — set from GET /api/session
 };
+
+function appLabel(id) {
+  const a = state.appCatalog.find((x) => x.id === id);
+  return a ? a.label : id;
+}
 
 // ---------------------------------------------------------------------------
 // Tiny DOM helpers
@@ -251,10 +257,59 @@ function renderTemplateDetails() {
     );
   }
 
-  // Options -> selects only (never free-text).
+  // What the template always deploys — visible before any customization.
+  const baseline = tpl.baseline || {};
+  const baseChips = $("#baseline-chips");
+  if (baseChips) {
+    baseChips.textContent = "";
+    for (const id of baseline.apps || []) {
+      baseChips.appendChild(el("span", { className: "chip chip-app", textContent: appLabel(id) }));
+    }
+    for (const r of baseline.realms || []) {
+      baseChips.appendChild(el("span", { className: "chip chip-realm", textContent: `Realm: ${r}` }));
+    }
+    if (baseline.campaign) {
+      baseChips.appendChild(
+        el("span", {
+          className: "chip chip-campaign",
+          textContent: `${baseline.campaign.cadence} access review`,
+        })
+      );
+    }
+  }
+
+  // Customization — still closed-choice only (selects, multi-selects, toggles).
   const wrap = $("#options-fields");
   wrap.textContent = "";
   for (const opt of tpl.options || []) {
+    const type = opt.type || "select";
+
+    if (type === "multi") {
+      const group = el("div", { className: "checks", id: `opt-${opt.id}` });
+      for (const ch of opt.choices || []) {
+        const box = el("input", { type: "checkbox", value: ch.value });
+        group.appendChild(el("label", { className: "check" }, [box, el("span", { textContent: ch.label })]));
+      }
+      wrap.appendChild(
+        el("div", { className: "field field-wide" }, [
+          el("span", { className: "field-label", textContent: opt.label }),
+          group,
+        ])
+      );
+      continue;
+    }
+
+    if (type === "toggle") {
+      const box = el("input", { type: "checkbox", id: `opt-${opt.id}`, checked: !!opt.default });
+      wrap.appendChild(
+        el("label", { className: "field field-toggle" }, [
+          box,
+          el("span", { className: "field-label", textContent: opt.label }),
+        ])
+      );
+      continue;
+    }
+
     const select = el("select", { id: `opt-${opt.id}` });
     for (const ch of opt.choices || []) {
       select.appendChild(el("option", { value: ch.value, textContent: ch.label }));
@@ -276,7 +331,15 @@ function collectOptions(tpl) {
   const out = {};
   for (const opt of tpl.options || []) {
     const node = document.getElementById(`opt-${opt.id}`);
-    if (node) out[opt.id] = node.value;
+    if (!node) continue;
+    const type = opt.type || "select";
+    if (type === "multi") {
+      out[opt.id] = [...node.querySelectorAll("input:checked")].map((b) => b.value);
+    } else if (type === "toggle") {
+      out[opt.id] = node.checked;
+    } else {
+      out[opt.id] = node.value;
+    }
   }
   return out;
 }
@@ -288,19 +351,45 @@ function choiceLabel(tpl, optId, value) {
   return ch ? ch.label : value;
 }
 
+// Mirror of the server's resolveTemplate(): concrete apps/realms/campaign for
+// the preview. The server recomputes this authoritatively on submit.
+function resolveClient(tpl, options) {
+  const baseline = tpl.baseline || {};
+  const apps = [...(baseline.apps || [])];
+  for (const id of options.addon_apps || []) if (!apps.includes(id)) apps.push(id);
+
+  const realms = [...(baseline.realms || [])];
+  for (const opt of tpl.options || []) {
+    if (opt.type === "toggle" && opt.realm && options[opt.id] && !realms.includes(opt.realm)) {
+      realms.push(opt.realm);
+    }
+  }
+
+  const campaign = { ...(baseline.campaign || {}) };
+  if (options.review_cadence) campaign.cadence = options.review_cadence;
+  return { apps, realms, campaign };
+}
+
 // Client-side plain-language plan (shown before committing).
 function buildPreviewPlan(tpl, name, options) {
   const orgName = name || `${tpl.name}`;
+  const { apps, realms, campaign } = resolveClient(tpl, options);
   const steps = [
-    `Claim a pre-warmed blank spoke org for "${orgName}".`,
+    `Claim a pre-warmed blank org for "${orgName}".`,
     `Apply the ${tpl.name} baseline, enforcing: ${(tpl.requiredControls || []).join(", ")}.`,
   ];
+  if (apps.length) steps.push(`Deploy applications: ${apps.map(appLabel).join(", ")}.`);
+  if (realms.length) steps.push(`Create realm${realms.length > 1 ? "s" : ""}: ${realms.join(", ")}.`);
+  if (campaign.cadence) {
+    steps.push(`Schedule a ${campaign.cadence} access certification campaign ("${campaign.name || "Access review"}").`);
+  }
   const optSummary = (tpl.options || [])
+    .filter((o) => (o.type || "select") === "select")
     .map((o) => `${o.label}: ${choiceLabel(tpl, o.id, options[o.id])}`)
     .join(" · ");
   if (optSummary) steps.push(`Configure options — ${optSummary}.`);
-  steps.push("Federate the spoke to the hub via SAML Org2Org (hub is IdP).");
-  steps.push("Assign you as scoped owner of this spoke only — no hub-wide access.");
+  steps.push("Federate the org to the hub via SAML Org2Org (hub is IdP).");
+  steps.push("Assign you as scoped owner of this org only — no hub-wide access.");
   return steps;
 }
 
@@ -372,7 +461,7 @@ async function onProvisionReal() {
   // Non-200 short-circuits reuse the same guardrail / session / pool handling.
   if (status !== 200 || !body || !body.jobId) {
     btn.disabled = false;
-    btn.innerHTML = '<span class="btn-label">Provision spoke</span>';
+    btn.innerHTML = '<span class="btn-label">Provision org</span>';
     if (status === 403) {
       $("#plan-card").hidden = true;
       $("#result-card").hidden = true;
@@ -388,7 +477,7 @@ async function onProvisionReal() {
       return;
     }
     if (status === 409) {
-      toast((body && body.error) || "The spoke pool is exhausted.", true);
+      toast((body && body.error) || "The org pool is exhausted.", true);
       return;
     }
     toast((body && body.error) || "Provisioning failed.", true);
@@ -413,7 +502,7 @@ async function onProvisionReal() {
   es.addEventListener("done", (e) => {
     es.close();
     btn.disabled = false;
-    btn.innerHTML = '<span class="btn-label">Provision spoke</span>';
+    btn.innerHTML = '<span class="btn-label">Provision org</span>';
 
     let payload = null;
     try { payload = JSON.parse(e.data); } catch { /* ignore */ }
@@ -424,13 +513,13 @@ async function onProvisionReal() {
       return;
     }
 
-    appendTermLine("Apply complete — spoke provisioned.", "done");
+    appendTermLine("Apply complete — org provisioned.", "done");
     btn.hidden = true;
     $("#result-sub").textContent = `${payload.org.name} · ${payload.org.id} · federated ✓`;
     renderPlan("#result-plan", payload.plan || []);
     $("#result-card").hidden = false;
     $("#result-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
-    toast("Spoke provisioned and federated.");
+    toast("Org provisioned and federated.");
     refreshMyOrgs();
   });
 
@@ -439,7 +528,7 @@ async function onProvisionReal() {
     if (es.readyState === EventSource.CLOSED) return;
     es.close();
     btn.disabled = false;
-    btn.innerHTML = '<span class="btn-label">Provision spoke</span>';
+    btn.innerHTML = '<span class="btn-label">Provision org</span>';
     appendTermLine("stream interrupted", "err");
     toast("Live stream interrupted.", true);
   };
@@ -466,7 +555,7 @@ async function onProvision() {
   });
 
   btn.disabled = false;
-  btn.innerHTML = '<span class="btn-label">Provision spoke</span>';
+  btn.innerHTML = '<span class="btn-label">Provision org</span>';
 
   if (status === 200 && body) {
     // Success — show returned plan (authoritative), hide preview/guardrail.
@@ -477,7 +566,7 @@ async function onProvision() {
     renderPlan("#result-plan", body.plan || []);
     $("#result-card").hidden = false;
     $("#result-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
-    toast("Spoke provisioned and federated.");
+    toast("Org provisioned and federated.");
     refreshMyOrgs();
     return;
   }
@@ -500,7 +589,7 @@ async function onProvision() {
   }
 
   if (status === 409) {
-    toast((body && body.error) || "The spoke pool is exhausted.", true);
+    toast((body && body.error) || "The org pool is exhausted.", true);
     return;
   }
 
@@ -518,7 +607,7 @@ function templateName(id) {
 async function refreshMyOrgs() {
   const list = $("#orgs-list");
   if (!state.user) {
-    list.innerHTML = '<div class="empty">Sign in to see the spokes you own.</div>';
+    list.innerHTML = '<div class="empty">Sign in to see the orgs you own.</div>';
     return;
   }
 
@@ -530,7 +619,7 @@ async function refreshMyOrgs() {
 
   const orgs = body.orgs || [];
   if (orgs.length === 0) {
-    list.innerHTML = '<div class="empty">No spokes yet. Provision one to see it here.</div>';
+    list.innerHTML = '<div class="empty">No orgs yet. Provision one to see it here.</div>';
     return;
   }
 
@@ -573,6 +662,7 @@ async function loadTemplates() {
   const { status, body } = await jsonFetch(API.templates);
   if (status === 200 && body && Array.isArray(body.templates)) {
     state.templates = body.templates;
+    state.appCatalog = Array.isArray(body.appCatalog) ? body.appCatalog : [];
     renderTemplateSelect();
   }
 }
