@@ -32,6 +32,40 @@ resource "okta_app_group_assignments" "welcome_baseline" {
   }
 }
 
+# ── Default MFA enrollment: don't force Okta Verify on federated users ────────
+# Fresh OIE orgs require Okta Verify enrollment at first sign-in, which breaks
+# the hub-SSO story: a JIT-provisioned federated user gets an enrollment
+# interstitial instead of the dashboard. Human sign-in is federation-only (MFA
+# happens at the hub), so enrollment on the spoke is optional.
+resource "okta_policy_mfa_default" "baseline" {
+  is_oie        = true
+  okta_password = { enroll = "REQUIRED" }
+  okta_verify   = { enroll = "OPTIONAL" }
+}
+
+# ── Dashboard access: trust the hub's MFA, don't demand a second factor ──────
+# The stock "Okta Dashboard" access policy's catch-all requires 2FA, so a
+# JIT-provisioned federated user (whose only "factor" is the hub's SAML
+# assertion, MFA-verified at the hub) gets an Okta Verify enrollment wall
+# instead of the dashboard. Add a higher-priority 1FA rule: federation-only
+# sign-in means assurance is the hub's job.
+data "okta_app" "dashboard" {
+  label = "Okta Dashboard"
+}
+
+data "okta_app_signon_policy" "dashboard" {
+  app_id = data.okta_app.dashboard.id
+}
+
+resource "okta_app_signon_policy_rule" "dashboard_federated_1fa" {
+  policy_id                   = data.okta_app_signon_policy.dashboard.id
+  name                        = "Baseline — hub-federated sign-in (1FA)"
+  priority                    = 1
+  access                      = "ALLOW"
+  factor_mode                 = "1FA"
+  re_authentication_frequency = "PT12H"
+}
+
 # Baseline = group + assigned app (both created reliably against the OIE org and
 # visible in the spoke admin console). Policy-type controls (password/MFA) are
 # shown in the portal as central-security-enforced chips; the OIE org rejected the

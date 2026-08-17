@@ -84,7 +84,10 @@ output "app_id" {
 
 output "federation_issuer" {
   description = "SAML issuer / Entity ID (IdP mode) - SP needs this for IdP config"
-  value       = local.create_app_saml ? "http://www.okta.com/${okta_app_saml.federation[0].id}" : null
+  # The REAL issuer Okta puts in the SAML response is the app's entity URL
+  # (http://www.okta.com/exk...), NOT http://www.okta.com/<app id> — the spoke
+  # rejects assertions ("Issuer did not match") if the hand-built form is used.
+  value = local.create_app_saml ? okta_app_saml.federation[0].entity_url : null
 }
 
 output "federation_sso_url" {

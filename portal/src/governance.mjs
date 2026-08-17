@@ -9,9 +9,11 @@
 // SECURITY: the token is used only in the Authorization header. It is never
 // logged and never included in onLine output.
 
+// Schema validated live against the OIG Campaigns API (2026-08-17): recurring
+// schedules take an ISO-8601 interval + repeatOnType inside `recurrence`.
 const CADENCE = {
-  monthly: { recurrenceType: "MONTHLY", label: "monthly" },
-  quarterly: { recurrenceType: "QUARTERLY", label: "quarterly" },
+  monthly: { interval: "P1M", label: "monthly" },
+  quarterly: { interval: "P3M", label: "quarterly" },
 };
 
 function sswsHeaders(token) {
@@ -87,7 +89,7 @@ export async function createCertificationCampaign({
     name: `${campaign.name} — ${orgDisplayName}`.slice(0, 100),
     description: `Recurring ${cadence.label} review of baseline access, scheduled automatically by the Org Factory portal.`,
     campaignType: "RESOURCE",
-    principalScopeSettings: { type: "ALL_USERS" },
+    principalScopeSettings: { type: "USERS" },
     resourceSettings: {
       type: "GROUP",
       targetResources: [{ resourceId: groupId, resourceType: "GROUP" }],
@@ -97,8 +99,11 @@ export async function createCertificationCampaign({
       type: "RECURRING",
       startDate: start.toISOString(),
       durationInDays: 14,
-      recurrenceType: cadence.recurrenceType,
       timeZone: "America/New_York",
+      recurrence: {
+        interval: cadence.interval,
+        repeatOnType: "SAME_DAY_AS_START_DATE",
+      },
     },
     remediationSettings: {
       accessApproved: "NO_ACTION",

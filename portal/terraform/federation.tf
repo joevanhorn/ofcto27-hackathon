@@ -74,7 +74,10 @@ module "spoke_federation" {
   account_link_action = "AUTO"
   subject_match_type  = "EMAIL"
   username_template   = "idpuser.email"
-  groups_action       = "NONE"
+  # Drop JIT-provisioned users straight into the baseline group so the
+  # template's apps are on their dashboard at first sign-in.
+  groups_action     = "ASSIGN"
+  groups_assignment = [okta_group.baseline_users.id]
 
   status = "ACTIVE"
 }

@@ -123,6 +123,38 @@ export async function resetSpoke(spoke, hub, onLine = () => {}) {
     if (del.ok || del.status === 204) { removed++; onLine(`  realm: deleted '${name}'`); }
   }
 
+  // 5a. The baseline's dashboard 1FA rule (portal-created on the "Okta
+  // Dashboard" access policy; never touch system rules like Catch-all).
+  const spokeApps = await api("GET", "/api/v1/apps?limit=200");
+  const dash = (Array.isArray(spokeApps.json) ? spokeApps.json : []).find(
+    (a) => a.name === "okta_enduser"
+  );
+  const dashPolicyId = dash && dash._links && dash._links.accessPolicy
+    ? dash._links.accessPolicy.href.split("/").pop()
+    : null;
+  if (dashPolicyId) {
+    const rules = await api("GET", `/api/v1/policies/${dashPolicyId}/rules`);
+    for (const rule of Array.isArray(rules.json) ? rules.json : []) {
+      if (rule.system || !/^Baseline — /.test(rule.name || "")) continue;
+      const del = await api("DELETE", `/api/v1/policies/${dashPolicyId}/rules/${rule.id}`);
+      if (del.ok || del.status === 204) { removed++; onLine(`  policy rule: deleted '${rule.name}'`); }
+    }
+  }
+
+  // 5b. JIT-provisioned federated users (so the next take shows JIT fresh).
+  // Only users whose credential provider is FEDERATION — never local admins.
+  const users = await api("GET", "/api/v1/users?limit=200");
+  for (const u of Array.isArray(users.json) ? users.json : []) {
+    const provider = u.credentials && u.credentials.provider && u.credentials.provider.type;
+    if (provider !== "FEDERATION") continue;
+    await api("POST", `/api/v1/users/${u.id}/lifecycle/deactivate`);
+    const del = await api("DELETE", `/api/v1/users/${u.id}`);
+    if (del.ok || del.status === 204) {
+      removed++;
+      onLine(`  user: deleted JIT-provisioned '${(u.profile && u.profile.login) || u.id}'`);
+    }
+  }
+
   // 6. Hub side: the federation SAML app that targets this spoke.
   if (hub && hub.token) {
     const hubApi = client(hub.domain, hub.token);
