@@ -12,6 +12,7 @@ const API = {
   requests: "/api/requests",
   myOrgs: "/api/my-orgs",
   pool: "/api/pool",
+  chat: "/api/chat",
 };
 
 // Shared fetch options — always carry the session cookie.
@@ -23,6 +24,8 @@ const state = {
   templates: [],
   appCatalog: [], // bookmark-app catalog, for labeling baseline/add-on apps
   mode: "sim", // "sim" | "real" — set from GET /api/session
+  chatEnabled: false, // server has an assistant API key configured
+  chatHistory: [], // full model-side history (server returns it each turn)
 };
 
 function appLabel(id) {
@@ -211,6 +214,7 @@ function onIdentityChange() {
     notice.hidden = false;
   }
   refreshMyOrgs();
+  refreshChatToggle();
 }
 
 // Hide plan/result/guardrail — used on identity change.
@@ -600,6 +604,111 @@ async function onProvision() {
 }
 
 // ---------------------------------------------------------------------------
+// Chat assistant
+// ---------------------------------------------------------------------------
+function chatVisible() {
+  return state.chatEnabled && !!state.user;
+}
+
+function refreshChatToggle() {
+  const toggle = $("#chat-toggle");
+  const panel = $("#chat-panel");
+  if (!toggle) return;
+  toggle.hidden = !chatVisible() || !panel.hidden;
+  if (!chatVisible()) panel.hidden = true;
+}
+
+function appendChatMsg(text, who) {
+  const box = $("#chat-messages");
+  const node = el("div", { className: `chat-msg chat-msg-${who}`, textContent: text });
+  box.appendChild(node);
+  box.scrollTop = box.scrollHeight;
+  return node;
+}
+
+// Apply a draft/submit action from the assistant through the NORMAL form flow
+// — same preview, same Provision button path, same server-side authz.
+function applyChatAction(action) {
+  const sel = $("#template-select");
+  if (sel.value !== action.templateId) {
+    sel.value = action.templateId;
+    renderTemplateDetails();
+  }
+  $("#org-name").value = action.name || "";
+
+  const tpl = selectedTemplate();
+  for (const opt of (tpl && tpl.options) || []) {
+    const node = document.getElementById(`opt-${opt.id}`);
+    if (!node || !(opt.id in (action.options || {}))) continue;
+    const val = action.options[opt.id];
+    const type = opt.type || "select";
+    if (type === "multi") {
+      for (const box of node.querySelectorAll("input")) {
+        box.checked = Array.isArray(val) && val.includes(box.value);
+      }
+    } else if (type === "toggle") {
+      node.checked = !!val;
+    } else {
+      node.value = val;
+    }
+  }
+
+  onPreview();
+  if (action.type === "submit") {
+    onProvision();
+  }
+}
+
+async function sendChat(text) {
+  state.chatHistory.push({ role: "user", content: text });
+  appendChatMsg(text, "user");
+  const pending = appendChatMsg("…", "assistant");
+
+  const { status, body } = await jsonFetch(API.chat, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ messages: state.chatHistory }),
+  });
+
+  if (status !== 200 || !body) {
+    pending.textContent =
+      status === 401
+        ? "Your session expired — please sign in again."
+        : "Sorry, the assistant is unavailable right now.";
+    return;
+  }
+
+  state.chatHistory = body.messages || state.chatHistory;
+  pending.textContent = body.reply || "(done)";
+  for (const action of body.actions || []) {
+    applyChatAction(action);
+  }
+}
+
+function wireChat() {
+  const toggle = $("#chat-toggle");
+  const panel = $("#chat-panel");
+  if (!toggle || !panel) return;
+  toggle.addEventListener("click", () => {
+    panel.hidden = false;
+    toggle.hidden = true;
+    $("#chat-text").focus();
+  });
+  $("#chat-close").addEventListener("click", () => {
+    panel.hidden = true;
+    refreshChatToggle();
+  });
+  $("#chat-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("#chat-text");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    sendChat(text);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Pre-warmed pool badge
 // ---------------------------------------------------------------------------
 async function refreshPool() {
@@ -693,6 +802,7 @@ async function loadSession() {
   const { status, body } = await jsonFetch(API.session);
   state.user = status === 200 && body ? body.user : null;
   if (status === 200 && body && body.mode) state.mode = body.mode;
+  state.chatEnabled = !!(status === 200 && body && body.chatEnabled);
 }
 
 function wireEvents() {
@@ -719,6 +829,7 @@ function showLoginErrorFromUrl() {
 
 async function boot() {
   wireEvents();
+  wireChat();
   await loadTemplates();
   await loadSession();
   onIdentityChange();

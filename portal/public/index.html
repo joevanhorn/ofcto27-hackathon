@@ -136,6 +136,25 @@
   </div>
 </main>
 
+<!-- Agentic chat assistant (shown only when the server has an API key) -->
+<button id="chat-toggle" class="chat-toggle" hidden>
+  <span aria-hidden="true">&#10022;</span> Ask the assistant
+</button>
+
+<div id="chat-panel" class="chat-panel" hidden>
+  <div class="chat-head">
+    <span class="chat-title"><span aria-hidden="true">&#10022;</span> Org Factory assistant</span>
+    <button id="chat-close" class="chat-close" aria-label="Close chat">&times;</button>
+  </div>
+  <div id="chat-messages" class="chat-messages" aria-live="polite">
+    <div class="chat-msg chat-msg-assistant">Hi! Tell me what your team needs — for example, <em>"I need an org for a new regulated client engagement"</em> — and I'll set up the request for you.</div>
+  </div>
+  <form id="chat-form" class="chat-input">
+    <input type="text" id="chat-text" placeholder="Describe what you need…" autocomplete="off" />
+    <button type="submit" class="btn btn-primary">Send</button>
+  </form>
+</div>
+
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="/app.js"></script>

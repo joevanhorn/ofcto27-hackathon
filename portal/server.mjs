@@ -25,6 +25,11 @@ import {
 } from "./src/config.mjs";
 import { provisionSpoke, subdomainOf, TERRAFORM_DIR } from "./src/provision.mjs";
 import { createCertificationCampaign } from "./src/governance.mjs";
+import { chatApiKey, runChat } from "./src/chat.mjs";
+
+// Chat assistant availability: key comes from env or the gitignored creds
+// file, in both sim and real mode. Never sent to the client.
+const CHAT_API_KEY = chatApiKey(loadCreds());
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -491,7 +496,11 @@ export function createServer() {
 
       // --- Session -------------------------------------------------------
       if (method === "GET" && pathname === "/api/session") {
-        return sendJson(res, 200, { user: currentUser(req), mode: DEMO_MODE });
+        return sendJson(res, 200, {
+          user: currentUser(req),
+          mode: DEMO_MODE,
+          chatEnabled: !!CHAT_API_KEY,
+        });
       }
 
       if (method === "POST" && pathname === "/api/login") {
@@ -520,6 +529,39 @@ export function createServer() {
           "sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
         );
         return sendJson(res, 200, { ok: true });
+      }
+
+      // --- Chat assistant --------------------------------------------------
+      // The assistant drafts and (on confirmation) submits through the SAME
+      // browser-side form flow as a human, so authz stays on /api/requests.
+      if (method === "POST" && pathname === "/api/chat") {
+        const user = currentUser(req);
+        if (!user) return sendJson(res, 401, { error: "not authenticated" });
+        if (!CHAT_API_KEY) return sendJson(res, 503, { error: "chat not configured" });
+
+        const body = await readBody(req);
+        const chatMessages = Array.isArray(body && body.messages) ? body.messages : null;
+        if (!chatMessages || !chatMessages.length) {
+          return sendJson(res, 400, { error: "messages required" });
+        }
+
+        try {
+          const result = await runChat({
+            messages: chatMessages,
+            user,
+            poolStatus,
+            apiKey: CHAT_API_KEY,
+          });
+          return sendJson(res, 200, {
+            reply: result.reply,
+            actions: result.actions,
+            messages: result.messages,
+          });
+        } catch (e) {
+          // Model/API failure — never leak the key or internals.
+          console.error("[chat]", e && e.message);
+          return sendJson(res, 502, { error: "assistant unavailable" });
+        }
       }
 
       // --- Pool status (the pre-warmed org count badge) --------------------
