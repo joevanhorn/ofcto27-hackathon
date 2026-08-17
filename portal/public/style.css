@@ -569,3 +569,25 @@ select {
 }
 .field-toggle input { accent-color: var(--accent); width: 17px; height: 17px; margin: 0; }
 .field-toggle .field-label { margin: 0; }
+
+/* ---------- Pre-warmed pool badge ---------- */
+.pool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6d5f7;
+  background: rgba(161, 0, 255, 0.14);
+  border: 1px solid rgba(161, 0, 255, 0.45);
+  border-radius: 999px;
+  padding: 8px 14px;
+}
+.pool-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #2fd07a;
+  box-shadow: 0 0 6px rgba(47, 208, 122, 0.8);
+}
+.pool-badge.pool-low { border-color: rgba(217, 67, 63, 0.6); background: rgba(217, 67, 63, 0.12); color: #f6d2d1; }
+.pool-badge.pool-low .pool-dot { background: var(--danger); box-shadow: 0 0 6px rgba(217, 67, 63, 0.8); }

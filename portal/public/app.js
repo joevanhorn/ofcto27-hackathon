@@ -11,6 +11,7 @@ const API = {
   templates: "/api/templates",
   requests: "/api/requests",
   myOrgs: "/api/my-orgs",
+  pool: "/api/pool",
 };
 
 // Shared fetch options — always carry the session cookie.
@@ -521,6 +522,7 @@ async function onProvisionReal() {
     $("#result-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
     toast("Org provisioned and federated.");
     refreshMyOrgs();
+    refreshPool();
   });
 
   es.onerror = () => {
@@ -568,6 +570,7 @@ async function onProvision() {
     $("#result-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
     toast("Org provisioned and federated.");
     refreshMyOrgs();
+    refreshPool();
     return;
   }
 
@@ -594,6 +597,25 @@ async function onProvision() {
   }
 
   toast((body && body.error) || "Provisioning failed.", true);
+}
+
+// ---------------------------------------------------------------------------
+// Pre-warmed pool badge
+// ---------------------------------------------------------------------------
+async function refreshPool() {
+  const badge = $("#pool-badge");
+  if (!badge) return;
+  const { status, body } = await jsonFetch(API.pool);
+  if (status !== 200 || !body) {
+    badge.hidden = true;
+    return;
+  }
+  const bad = (body.orgs || []).filter((o) => o.status === "bad-token").length;
+  let text = `${body.ready} of ${body.total} pre-warmed orgs ready`;
+  if (bad) text += ` · ${bad} token issue${bad > 1 ? "s" : ""}`;
+  $("#pool-badge-text").textContent = text;
+  badge.classList.toggle("pool-low", body.ready === 0 || bad > 0 || body.hubTokenOk === false);
+  badge.hidden = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +722,7 @@ async function boot() {
   await loadTemplates();
   await loadSession();
   onIdentityChange();
+  refreshPool();
   showLoginErrorFromUrl();
 }
 

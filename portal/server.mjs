@@ -23,7 +23,7 @@ import {
   sswsHeader,
   spokePool,
 } from "./src/config.mjs";
-import { provisionSpoke, subdomainOf } from "./src/provision.mjs";
+import { provisionSpoke, subdomainOf, TERRAFORM_DIR } from "./src/provision.mjs";
 import { createCertificationCampaign } from "./src/governance.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -223,6 +223,37 @@ function dataRegion(options) {
 
 const REAL = IS_REAL ? buildRealConfig() : null;
 
+// A spoke whose per-spoke terraform state file already holds resources has
+// been handed out (possibly by a previous server process) — treat it as
+// claimed so restarts never double-provision the same org.
+function spokeStateHasResources(subdomain) {
+  try {
+    const raw = fs.readFileSync(
+      path.join(TERRAFORM_DIR, "state", `${subdomain}.tfstate`),
+      "utf8"
+    );
+    const state = JSON.parse(raw);
+    return Array.isArray(state.resources) && state.resources.length > 0;
+  } catch {
+    return false; // no state file -> blank
+  }
+}
+
+// Boot-time credential probe: preview-org SSWS tokens expire after 30 idle
+// days, and a dead token surfacing mid-demo is the worst possible moment.
+// Marks each spoke (and the hub) so /api/pool can report it up front.
+async function probeToken(domain, token) {
+  if (!token) return false;
+  try {
+    const r = await fetch(`https://${domain}/api/v1/users/me`, {
+      headers: { authorization: sswsHeader(token), accept: "application/json" },
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 // Realms are feature-gated on trial orgs: probe the spoke before the apply so
 // terraform only creates them where they can exist (explicit skip otherwise).
 async function orgSupportsRealms(spoke) {
@@ -278,6 +309,54 @@ export function createServer() {
   const claimed = new Set(); // spoke subdomains already handed out
   const jobs = new Map(); // jobId -> { lines, done, result, spoke, user, name, templateId }
   const orgs = []; // provisioned org records
+
+  if (IS_REAL) {
+    // Seed claims from per-spoke terraform state so restarts never hand the
+    // same org out twice, and probe every token up front (async — the pool
+    // endpoint reports "checking" until each probe lands).
+    for (const s of REAL.spokes) {
+      if (spokeStateHasResources(s.subdomain)) claimed.add(s.subdomain);
+      s.tokenOk = null; // null = probe in flight
+      probeToken(s.domain, s.token).then((ok) => {
+        s.tokenOk = ok;
+        if (!ok) console.warn(`[pool] spoke ${s.domain}: API token invalid or expired`);
+      });
+    }
+    probeToken(REAL.issuer.replace(/^https:\/\//, ""), REAL.hub.apiToken).then((ok) => {
+      REAL.hubTokenOk = ok;
+      if (!ok) console.warn("[pool] hub API token invalid or expired");
+    });
+  }
+
+  // One row per spoke for /api/pool: ready | claimed | bad-token | checking.
+  function poolStatus() {
+    if (!IS_REAL) {
+      const blank = pool.filter((o) => o.status === "blank").length;
+      return {
+        mode: "sim",
+        ready: blank,
+        total: pool.length,
+        orgs: pool.map((o) => ({ id: o.id, status: o.status === "blank" ? "ready" : "claimed" })),
+      };
+    }
+    const rows = REAL.spokes.map((s) => ({
+      id: s.subdomain,
+      status: claimed.has(s.subdomain)
+        ? "claimed"
+        : s.tokenOk === false
+        ? "bad-token"
+        : s.tokenOk === null
+        ? "checking"
+        : "ready",
+    }));
+    return {
+      mode: "real",
+      ready: rows.filter((r) => r.status === "ready").length,
+      total: rows.length,
+      hubTokenOk: REAL.hubTokenOk !== false,
+      orgs: rows,
+    };
+  }
 
   function currentUser(req) {
     const cookies = parseCookies(req);
@@ -443,6 +522,11 @@ export function createServer() {
         return sendJson(res, 200, { ok: true });
       }
 
+      // --- Pool status (the pre-warmed org count badge) --------------------
+      if (method === "GET" && pathname === "/api/pool") {
+        return sendJson(res, 200, poolStatus());
+      }
+
       // --- Templates -----------------------------------------------------
       if (method === "GET" && pathname === "/api/templates") {
         return sendJson(res, 200, { templates: TEMPLATES, appCatalog: APP_CATALOG });
@@ -472,8 +556,9 @@ export function createServer() {
 
         // --- Real mode: claim a spoke and run a live terraform apply -------
         if (IS_REAL) {
+          // Never hand out a spoke whose token failed the boot probe.
           const spoke = (REAL.spokes || []).find(
-            (s) => s.token && !claimed.has(s.subdomain)
+            (s) => s.token && !claimed.has(s.subdomain) && s.tokenOk !== false
           );
           if (!spoke) {
             return sendJson(res, 409, { error: "pool exhausted" });

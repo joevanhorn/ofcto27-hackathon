@@ -101,6 +101,69 @@ test("Division Lead can provision a spoke and SSO into it", async () => {
   }
 });
 
+test("pool endpoint reports ready count and decrements on claim", async () => {
+  const { base, close } = await startEphemeral();
+  try {
+    const client = makeClient(base);
+
+    let pool = await (await client("/api/pool")).json();
+    assert.equal(pool.mode, "sim");
+    assert.equal(pool.ready, pool.total);
+    assert.ok(pool.total >= 2, "expected a multi-org pool");
+
+    await client("/api/login", {
+      method: "POST",
+      body: JSON.stringify({ role: "lead" }),
+    });
+    const reqRes = await client("/api/requests", {
+      method: "POST",
+      body: JSON.stringify({ name: "Pool Test", templateId: "standard-division", options: {} }),
+    });
+    assert.equal(reqRes.status, 200);
+
+    pool = await (await client("/api/pool")).json();
+    assert.equal(pool.ready, pool.total - 1, "one org should be claimed");
+    assert.equal(pool.orgs.filter((o) => o.status === "claimed").length, 1);
+  } finally {
+    await close();
+  }
+});
+
+test("resolved template spec drives the provisioning plan", async () => {
+  const { base, close } = await startEphemeral();
+  try {
+    const client = makeClient(base);
+    await client("/api/login", {
+      method: "POST",
+      body: JSON.stringify({ role: "lead" }),
+    });
+    const reqRes = await client("/api/requests", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Partner Pilot",
+        templateId: "partner-sandbox",
+        options: { addon_apps: ["confluence"], employee_realm: true },
+      }),
+    });
+    assert.equal(reqRes.status, 200);
+    const { org, plan } = await reqRes.json();
+
+    // Baseline app + chosen add-on resolved into concrete apps.
+    const appIds = org.resolved.apps.map((a) => a.id);
+    assert.deepEqual(appIds, ["jira", "confluence"]);
+    // Baseline realm + toggled realm.
+    assert.deepEqual(org.resolved.realms, ["Partners", "Employees"]);
+    // Template cadence.
+    assert.equal(org.resolved.campaign.cadence, "monthly");
+    // The plan narrates all of it.
+    assert.ok(plan.some((s) => /Jira, Confluence/.test(s)), "plan lists apps");
+    assert.ok(plan.some((s) => /Partners, Employees/.test(s)), "plan lists realms");
+    assert.ok(plan.some((s) => /monthly access certification/.test(s)), "plan lists campaign");
+  } finally {
+    await close();
+  }
+});
+
 test("non-member is denied provisioning with 403", async () => {
   const { base, close } = await startEphemeral();
   try {
