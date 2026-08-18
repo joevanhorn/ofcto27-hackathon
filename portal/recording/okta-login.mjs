@@ -20,7 +20,9 @@ export function totp(sec, t = Date.now()) {
 const CHOOSER = /select from the following|verify it.?s you with a security method/i;
 
 async function onChooser(page) {
-  return (await page.getByText(CHOOSER).first().count().catch(() => 0)) > 0;
+  // Visibility, not presence: the chooser heading lingers hidden in the DOM
+  // after a method is selected, and count() would keep matching it.
+  return await page.getByText(CHOOSER).first().isVisible().catch(() => false);
 }
 // Click the "Select" control in the option row matching labelRe.
 async function chooseMethod(page, labelRe) {
@@ -51,19 +53,28 @@ export async function oktaLogin(page, { user, pass, totpSecret, doneUrl = /local
   await clickVerify(page);
   await page.waitForTimeout(1500);
 
-  // 3) second factor (TOTP) — chooser (if shown), then the code field
+  // 3) second factor (TOTP) — chooser (if shown), then the code field.
+  // Retry loop rather than one timed attempt: page transitions are slower via
+  // the public HTTPS proxy, and a fill landing mid-transition is silently lost.
   if (totpSecret) {
-    await Promise.race([
-      page.waitForURL(doneUrl, { timeout: 8000 }).catch(() => {}),
-      page.getByText(/enter a code|enter code/i).first().waitFor({ timeout: 10000 }).catch(() => {}),
-    ]);
-    if (!doneUrl.test(page.url())) {
-      if (await onChooser(page)) { await chooseMethod(page, /enter a code|okta verify/i); }
-      const code = page.getByRole("textbox").first();
-      await code.waitFor({ timeout: 10000 });
-      await code.fill(totp(totpSecret));
-      await onStage("totp");
-      await clickVerify(page);
+    const passcode = page
+      .locator('input[name="credentials.totp"], input[name="credentials.passcode"], input[autocomplete="one-time-code"]')
+      .first();
+    for (let attempt = 0; attempt < 6 && !doneUrl.test(page.url()); attempt++) {
+      await Promise.race([
+        page.waitForURL(doneUrl, { timeout: 5000 }).catch(() => {}),
+        passcode.waitFor({ timeout: 5000 }).catch(() => {}),
+      ]);
+      if (doneUrl.test(page.url())) break;
+      // A visible code field always wins — only fall back to the chooser.
+      if (await passcode.isVisible().catch(() => false)) {
+        await passcode.fill(totp(totpSecret));
+        await onStage("totp");
+        await clickVerify(page);
+        await page.waitForTimeout(2500);
+      } else if (await onChooser(page)) {
+        await chooseMethod(page, /enter a code|okta verify/i).catch(() => {});
+      }
     }
   }
   await page.waitForURL(doneUrl, { timeout: 25000 }).catch(() => {});
