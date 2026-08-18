@@ -203,6 +203,8 @@ async function logout() {
 
 // Called whenever the signed-in identity changes.
 function onIdentityChange() {
+  // Real mode gates the catalog behind login — fetch it once signed in.
+  if (state.user && !state.templates.length) loadTemplates();
   renderIdentity();
   resetFlowPanels();
   const form = $("#request-form");

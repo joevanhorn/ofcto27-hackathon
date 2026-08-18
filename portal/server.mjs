@@ -567,6 +567,9 @@ export function createServer() {
 
       // --- Pool status (the pre-warmed org count badge) --------------------
       if (method === "GET" && pathname === "/api/pool") {
+        if (IS_REAL && !currentUser(req)) {
+          return sendJson(res, 401, { error: "not authenticated" });
+        }
         return sendJson(res, 200, poolStatus());
       }
 
@@ -623,7 +626,12 @@ export function createServer() {
       }
 
       // --- Templates -----------------------------------------------------
+      // Real mode is internet-facing: catalog and pool require a session.
+      // Sim mode stays open (stage-safe demo + tests).
       if (method === "GET" && pathname === "/api/templates") {
+        if (IS_REAL && !currentUser(req)) {
+          return sendJson(res, 401, { error: "not authenticated" });
+        }
         return sendJson(res, 200, { templates: TEMPLATES, appCatalog: APP_CATALOG });
       }
 
