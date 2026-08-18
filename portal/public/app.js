@@ -622,7 +622,10 @@ function refreshChatToggle() {
 
 function appendChatMsg(text, who) {
   const box = $("#chat-messages");
-  const node = el("div", { className: `chat-msg chat-msg-${who}`, textContent: text });
+  // Bubbles are plain text (textContent — no HTML injection); just strip the
+  // markdown bold/italic markers the model sometimes emits.
+  const plain = String(text).replace(/\*\*(.+?)\*\*/g, "$1").replace(/(^|\s)\*(\S[^*]*)\*/g, "$1$2");
+  const node = el("div", { className: `chat-msg chat-msg-${who}`, textContent: plain });
   box.appendChild(node);
   box.scrollTop = box.scrollHeight;
   return node;
@@ -664,13 +667,17 @@ function applyChatAction(action) {
 async function sendChat(text) {
   state.chatHistory.push({ role: "user", content: text });
   appendChatMsg(text, "user");
-  const pending = appendChatMsg("…", "assistant");
+  let pending = appendChatMsg("…", "assistant");
 
   const { status, body } = await jsonFetch(API.chat, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ messages: state.chatHistory }),
   });
+
+  // A demo reset can clear the chat DOM while this turn is in flight —
+  // re-attach so the reply is never written to a detached node.
+  if (!pending.isConnected) pending = appendChatMsg("…", "assistant");
 
   if (status !== 200 || !body) {
     pending.textContent =

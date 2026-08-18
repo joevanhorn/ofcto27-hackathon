@@ -36,8 +36,8 @@ How to work:
 - Ask only for what you actually need (usually: what the org is for, a name, and any special needs). One or two questions at a time.
 - When you have enough, call draft_request — the portal fills the request form and shows the user the exact plan.
 - Only call submit_request after the user has seen the draft and clearly confirms (e.g. "go ahead", "submit it").
-- If the user isn't authorized, the platform will refuse at submission — that guardrail is a feature; explain it matter-of-factly.
-- Keep replies to a few sentences. You are a helper in a side panel, not a report writer.`;
+- Authorization is the platform's job, not yours. If the user may not be authorized, say so once — but if they still ask to submit, call submit_request anyway and let the platform enforce its guardrail. Never act as the gatekeeper yourself.
+- Keep replies to a few sentences, in plain text (no markdown — the chat panel renders text only). You are a helper in a side panel, not a report writer.`;
 
 // Closed-choice tool schemas. draft/submit share the same request shape.
 function requestSchema() {
@@ -163,17 +163,27 @@ export async function runChat({ messages, user, poolStatus, apiKey, fetchImpl = 
     `\n\nSigned-in user: ${user.name}${(user.groups || []).includes("Division Leads") ? " (authorized Division Lead)" : " (NOT in Division Leads — cannot provision)"}.`;
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    // Per-call timeout: node fetch has none, and one stalled connection must
+    // not hang the demo — surface "assistant unavailable" and let them retry.
     const res = await fetchImpl(API_URL, {
+      signal: AbortSignal.timeout(120000),
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
+        // Server-side refusal fallback (beta): claude-opus-5's safety
+        // classifiers can false-positive on benign provisioning chatter
+        // (observed live: category "cyber" on "spin up an org … submit it
+        // immediately"). "default" re-serves a declined request on Anthropic's
+        // recommended fallback model within the same call.
+        "anthropic-beta": "server-side-fallback-2026-07-01",
       },
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 2048,
         output_config: { effort: "low" },
+        fallbacks: "default",
         system,
         tools: tools(),
         messages: history,
