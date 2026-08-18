@@ -302,7 +302,32 @@ export function createServer() {
   // record of provisioned spokes shown in "My orgs".
   const claimed = new Set(); // spoke subdomains already handed out
   const jobs = new Map(); // jobId -> { lines, done, result, spoke, user, name, templateId }
-  const orgs = []; // provisioned org records
+  const orgs = []; // provisioned org records (real mode: persisted to disk)
+
+  // Real-mode org records survive server restarts: persisted next to the
+  // per-spoke terraform state, and reconciled against it at boot so a record
+  // never outlives (or ghosts) the org it describes.
+  const ORGS_FILE = path.join(TERRAFORM_DIR, "state", "orgs.json");
+  function saveOrgs() {
+    if (!IS_REAL) return;
+    try {
+      fs.writeFileSync(ORGS_FILE, JSON.stringify(orgs, null, 2));
+    } catch (e) {
+      console.error("[orgs] persist failed:", e && e.message);
+    }
+  }
+  if (IS_REAL) {
+    try {
+      const stored = JSON.parse(fs.readFileSync(ORGS_FILE, "utf8"));
+      for (const rec of Array.isArray(stored) ? stored : []) {
+        // Only revive records whose spoke still holds provisioned state.
+        if (spokeStateHasResources(rec.id)) orgs.push(rec);
+      }
+      if (orgs.length) console.log(`[orgs] restored ${orgs.length} org record(s)`);
+    } catch {
+      /* no file yet */
+    }
+  }
 
   if (IS_REAL) {
     // Seed claims from per-spoke terraform state so restarts never hand the
@@ -605,6 +630,7 @@ export function createServer() {
           for (let i = orgs.length - 1; i >= 0; i--) {
             if (results.some((r) => r.clean && r.subdomain === orgs[i].id)) orgs.splice(i, 1);
           }
+          saveOrgs();
           jobs.clear();
           return sendJson(res, 200, { clean, lines, pool: poolStatus() });
         } catch (e) {
@@ -733,6 +759,7 @@ export function createServer() {
                 campaign,
               };
               orgs.push(orgRecord);
+              saveOrgs();
               job.result = { org: orgRecord, plan };
             } else {
               job.result = { error: "provisioning failed", code: r.code };
