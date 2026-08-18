@@ -54,22 +54,6 @@ function addonAppsOption(excludeIds) {
   };
 }
 
-const RETENTION_CHOICES = [
-  { value: "90d", label: "90 days" },
-  { value: "180d", label: "180 days" },
-  { value: "1y", label: "1 year" },
-];
-
-const REGION_OPTION = {
-  id: "region",
-  type: "select",
-  label: "Data residency region",
-  choices: [
-    { value: "US", label: "United States" },
-    { value: "EU", label: "European Union" },
-  ],
-};
-
 // Provisioning templates ("baselines"). Each template enforces a fixed set of
 // security controls, always deploys its `baseline` block (apps, realms, and a
 // recurring access-certification campaign), and offers only deterministic,
@@ -102,22 +86,19 @@ export const TEMPLATES = [
         default: false,
         realm: "Contractors",
       },
-      { id: "retention", type: "select", label: "Log retention period", choices: RETENTION_CHOICES },
-      REGION_OPTION,
     ],
   },
   {
     id: "regulated-client",
     name: "Regulated / Client-Data Org",
     description:
-      "Hardened baseline for divisions handling regulated or client data. Same federation-only, scoped-admin controls plus mandatory long retention and a tighter certification cadence.",
+      "Hardened baseline for divisions handling regulated or client data. Same federation-only, scoped-admin controls with a tighter certification cadence.",
     requiredControls: [
       "Phishing-resistant MFA",
       "Federation-only human sign-in",
       "Scoped admin role (this org only)",
       "Break-glass admin",
       "Recurring access certification",
-      "Extended audit retention",
     ],
     baseline: {
       apps: ["servicenow", "workday"],
@@ -135,14 +116,6 @@ export const TEMPLATES = [
           { value: "monthly", label: "Monthly" },
         ],
       },
-      {
-        id: "retention",
-        type: "select",
-        label: "Log retention period",
-        // Regulated orgs never get the short window.
-        choices: RETENTION_CHOICES.filter((c) => c.value !== "90d"),
-      },
-      REGION_OPTION,
     ],
   },
   {
@@ -181,13 +154,6 @@ export const TEMPLATES = [
         default: false,
         realm: "Employees",
       },
-      {
-        id: "retention",
-        type: "select",
-        label: "Log retention period",
-        choices: RETENTION_CHOICES.filter((c) => c.value !== "1y"),
-      },
-      REGION_OPTION,
     ],
   },
 ];

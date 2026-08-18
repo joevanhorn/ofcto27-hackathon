@@ -215,18 +215,6 @@ function buildRealConfig() {
   };
 }
 
-// Map the portal's closed-choice options onto terraform's deterministic knobs.
-function retentionDays(options) {
-  const r = (options && options.retention) || "";
-  if (r === "180d") return "180";
-  if (r === "1y") return "365";
-  return "90";
-}
-function dataRegion(options) {
-  const region = (options && options.region) || "us";
-  return String(region).toLowerCase();
-}
-
 const REAL = IS_REAL ? buildRealConfig() : null;
 
 // A spoke whose per-spoke terraform state file already holds resources has
@@ -703,8 +691,6 @@ export function createServer() {
               vars: {
                 org_display_name: name,
                 template_id: templateId,
-                retention_days: retentionDays(options),
-                data_region: dataRegion(options),
                 deploy_apps: resolved.apps,
                 realm_names: resolved.realms,
                 enable_realms: realmsOk,

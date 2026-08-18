@@ -30,18 +30,6 @@ variable "template_id" {
   default     = "standard-spoke"
 }
 
-variable "retention_days" {
-  description = "Deterministic knob: archive retention window on teardown"
-  type        = string
-  default     = "90"
-}
-
-variable "data_region" {
-  description = "Deterministic knob: data region"
-  type        = string
-  default     = "us"
-}
-
 # Resolved template spec: apps to deploy (baseline + chosen add-ons). The
 # portal passes this as JSON via TF_VAR_deploy_apps.
 variable "deploy_apps" {

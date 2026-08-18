@@ -33,7 +33,7 @@ output "applied_summary" {
       ? [for r in okta_realm.template : "Created realm '${r.name}' (${r.realm_type})"]
       : (length(var.realm_names) > 0 ? ["Realms skipped — feature not available on this org"] : []),
     [
-      "Template '${var.template_id}' — retention ${var.retention_days}d, region ${var.data_region}",
+      "Template '${var.template_id}' baseline applied",
     ]
   )
 }

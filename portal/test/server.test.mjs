@@ -71,7 +71,7 @@ test("Division Lead can provision a spoke and SSO into it", async () => {
       body: JSON.stringify({
         name: "Marketing Division Spoke",
         templateId: template.id,
-        options: { retention: "1y", region: "US" },
+        options: {},
       }),
     });
     assert.equal(reqRes.status, 200);

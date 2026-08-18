@@ -131,7 +131,7 @@ function runApply(stateFile, env, onLine) {
  *
  * @param {object} args
  * @param {{domain: string, token: string, subdomain?: string}} args.spoke
- * @param {{org_display_name: string, template_id?: string, retention_days?: string, data_region?: string}} args.vars
+ * @param {{org_display_name: string, template_id?: string, deploy_apps?: object[], realm_names?: string[], enable_realms?: boolean}} args.vars
  * @param {{orgName: string, baseUrl?: string, apiToken: string}} [args.hub] - hub org creds; omit to skip federation.
  * @param {(line: string) => void} args.onLine - called for every output line as it arrives (real streaming).
  * @returns {Promise<{ok: true, outputs: object} | {ok: false, code: number|null}>}
@@ -159,8 +159,6 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, federation 
     TF_VAR_spoke_api_token: bareToken(spoke && spoke.token),
     TF_VAR_org_display_name: vars.org_display_name || subdomain,
     TF_VAR_template_id: vars.template_id || "standard-spoke",
-    TF_VAR_retention_days: String(vars.retention_days || "90"),
-    TF_VAR_data_region: vars.data_region || "us",
     // Concrete template spec (resolved server-side): bookmark apps + realms.
     TF_VAR_deploy_apps: JSON.stringify(vars.deploy_apps || []),
     TF_VAR_realm_names: JSON.stringify(vars.realm_names || []),
