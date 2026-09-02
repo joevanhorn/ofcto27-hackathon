@@ -54,6 +54,20 @@ function addonAppsOption(excludeIds) {
   };
 }
 
+// Toggle offered by every template: provision a TaskVantage Active Directory
+// (Windows EC2 DC in the shared AD VPC, tv* schema + enterprise OU tree +
+// sample users) and stage the Okta AD agent for Universal Directory import.
+// `ad: true` is what resolveTemplate keys on — deliberately not `realm`.
+function activeDirectoryOption() {
+  return {
+    id: "include_ad",
+    type: "toggle",
+    label: "Include Active Directory (TaskVantage enterprise directory + Okta AD agent)",
+    default: false,
+    ad: true,
+  };
+}
+
 // Provisioning templates ("baselines"). Each template enforces a fixed set of
 // security controls, always deploys its `baseline` block (apps, realms, and a
 // recurring access-certification campaign), and offers only deterministic,
@@ -86,6 +100,7 @@ export const TEMPLATES = [
         default: false,
         realm: "Contractors",
       },
+      activeDirectoryOption(),
     ],
   },
   {
@@ -116,6 +131,7 @@ export const TEMPLATES = [
           { value: "monthly", label: "Monthly" },
         ],
       },
+      activeDirectoryOption(),
     ],
   },
   {
@@ -154,6 +170,7 @@ export const TEMPLATES = [
         default: false,
         realm: "Employees",
       },
+      activeDirectoryOption(),
     ],
   },
 ];
@@ -166,7 +183,7 @@ export const TEMPLATES = [
  *
  * @param {object} template - an entry from TEMPLATES
  * @param {object} options - { [optionId]: value } — multi values are arrays
- * @returns {{apps: Array<{id,label,url}>, realms: string[], campaign: {cadence, name}}}
+ * @returns {{apps: Array<{id,label,url}>, realms: string[], campaign: {cadence, name}, activeDirectory: boolean}}
  */
 export function resolveTemplate(template, options = {}) {
   const baseline = template.baseline || {};
@@ -197,7 +214,17 @@ export function resolveTemplate(template, options = {}) {
     campaign.cadence = options.review_cadence;
   }
 
-  return { apps, realms, campaign };
+  // Non-realm toggles marked `ad: true` opt the spoke into a TaskVantage
+  // Active Directory (only honored if the template offers the toggle).
+  let activeDirectory = false;
+  for (const opt of template.options || []) {
+    if (opt.type === "toggle" && opt.ad) {
+      const v = options[opt.id];
+      if (v === true || v === "true" || v === "on") activeDirectory = true;
+    }
+  }
+
+  return { apps, realms, campaign, activeDirectory };
 }
 
 // A fresh pool of pre-warmed blank spoke orgs. Returning a new array (with new

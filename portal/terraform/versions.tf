@@ -6,5 +6,9 @@ terraform {
       source  = "okta/okta"
       version = ">= 6.4.0, < 7.0.0"
     }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.60"
+    }
   }
 }

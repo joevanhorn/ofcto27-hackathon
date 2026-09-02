@@ -164,7 +164,18 @@ export async function provisionSpoke({ spoke, vars = {}, hub = null, federation 
     TF_VAR_realm_names: JSON.stringify(vars.realm_names || []),
     TF_VAR_enable_realms: vars.enable_realms ? "true" : "false",
     TF_VAR_enable_federation: federationEnabled ? "true" : "false",
+    TF_VAR_enable_active_directory: vars.enable_active_directory ? "true" : "false",
   };
+  // AD vars only when the toggle is on — passwords are generated per request by
+  // the server (src/directory.mjs) and, like tokens, flow env-only.
+  if (vars.enable_active_directory) {
+    env.TF_VAR_ad_computer_name = vars.ad_computer_name || "";
+    env.TF_VAR_ad_admin_password = vars.ad_admin_password || "";
+    env.TF_VAR_ad_safe_mode_password = vars.ad_safe_mode_password || "";
+    if (vars.ad_s3_bucket) env.TF_VAR_ad_s3_bucket = vars.ad_s3_bucket;
+    if (vars.ad_s3_prefix) env.TF_VAR_ad_s3_prefix = vars.ad_s3_prefix;
+    if (vars.ad_aws_region) env.TF_VAR_aws_region = vars.ad_aws_region;
+  }
   // Hub creds are set whenever available — the aliased okta.hub PROVIDER must
   // initialize even in baseline-only mode (federation resources are count=0 then).
   if (hubCreds) {

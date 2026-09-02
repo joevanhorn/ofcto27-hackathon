@@ -376,13 +376,18 @@ function resolveClient(tpl, options) {
 
   const campaign = { ...(baseline.campaign || {}) };
   if (options.review_cadence) campaign.cadence = options.review_cadence;
-  return { apps, realms, campaign };
+
+  let activeDirectory = false;
+  for (const opt of tpl.options || []) {
+    if (opt.type === "toggle" && opt.ad && options[opt.id]) activeDirectory = true;
+  }
+  return { apps, realms, campaign, activeDirectory };
 }
 
 // Client-side plain-language plan (shown before committing).
 function buildPreviewPlan(tpl, name, options) {
   const orgName = name || `${tpl.name}`;
-  const { apps, realms, campaign } = resolveClient(tpl, options);
+  const { apps, realms, campaign, activeDirectory } = resolveClient(tpl, options);
   const steps = [
     `Claim a pre-warmed blank org for "${orgName}".`,
     `Apply the ${tpl.name} baseline, enforcing: ${(tpl.requiredControls || []).join(", ")}.`,
@@ -391,6 +396,13 @@ function buildPreviewPlan(tpl, name, options) {
   if (realms.length) steps.push(`Create realm${realms.length > 1 ? "s" : ""}: ${realms.join(", ")}.`);
   if (campaign.cadence) {
     steps.push(`Schedule a ${campaign.cadence} access certification campaign ("${campaign.name || "Access review"}").`);
+  }
+  if (activeDirectory) {
+    steps.push(
+      "Launch a TaskVantage AD domain controller (taskvantage.local) in the shared AD VPC.",
+      "Build the enterprise directory: tv* schema attributes, 242 OUs, groups, sample users.",
+      "Stage the Okta AD agent for Universal Directory import into this org."
+    );
   }
   const optSummary = (tpl.options || [])
     .filter((o) => (o.type || "select") === "select")
@@ -783,6 +795,90 @@ function templateName(id) {
   return t ? t.name : id || "—";
 }
 
+// ---------------------------------------------------------------------------
+// Active Directory status on the org card
+// ---------------------------------------------------------------------------
+// One poller per org; re-rendering the list replaces the element the poller
+// writes into, so track them and stop stale ones.
+const adPollers = new Map(); // orgId -> timeout handle
+
+function adChecklist(orgId, ad) {
+  const cmd = `aws ssm start-session --target ${ad.instanceId || "<instance-id>"} \\
+  --document-name AWS-StartPortForwardingSession \\
+  --parameters portNumber=3389,localPortNumber=13389`;
+  const details = el("details", { className: "org-meta" }, [
+    el("summary", { textContent: "Finish the Okta import (manual steps)" }),
+  ]);
+  const ol = el("ol");
+  ol.appendChild(el("li", {}, ["Port-forward RDP over SSM: ", el("code", { textContent: cmd })]));
+  const pwBtn = el("button", {
+    className: "btn",
+    textContent: "Reveal Administrator password",
+    onclick: async () => {
+      const { status, body } = await jsonFetch(`/api/orgs/${encodeURIComponent(orgId)}/ad/password`, {
+        method: "POST",
+      });
+      pwBtn.replaceWith(
+        el("code", {
+          textContent:
+            status === 200 && body && body.password ? body.password : "could not read password",
+        })
+      );
+    },
+  });
+  ol.appendChild(
+    el("li", {}, [
+      `RDP to localhost:13389 as ${ad.domain ? ad.domain.split(".")[0].toUpperCase() : "TASKVANTAGE"}\\Administrator — `,
+      pwBtn,
+    ])
+  );
+  ol.appendChild(
+    el("li", {
+      textContent:
+        "On the DC, run C:\\Terraform\\OktaADAgentSetup.exe and sign in to THIS spoke org (browser activation code).",
+    })
+  );
+  ol.appendChild(
+    el("li", {
+      textContent:
+        "Spoke Admin Console → Directory → Directory Integrations → Active Directory: select the TASKVANTAGE + Field/Corp OUs, map the tv* attributes, run a Full Import.",
+    })
+  );
+  details.appendChild(ol);
+  return details;
+}
+
+function watchAdStatus(orgId, container) {
+  const prior = adPollers.get(orgId);
+  if (prior) clearTimeout(prior);
+
+  const tick = async () => {
+    const { status, body } = await jsonFetch(`/api/orgs/${encodeURIComponent(orgId)}/ad`);
+    if (status !== 200 || !body) return;
+    container.textContent = "";
+    const stateClass =
+      body.status === "ready" ? "fed-badge" : "org-meta";
+    container.appendChild(
+      el("div", { className: "org-meta" }, [
+        el("span", { className: stateClass, textContent: `AD: ${body.status}` }),
+        "  ",
+        body.message || "",
+      ])
+    );
+    if (body.status === "ready") {
+      container.appendChild(adChecklist(orgId, body));
+      adPollers.delete(orgId);
+      return;
+    }
+    if (body.status === "error" || body.status === "timeout") {
+      adPollers.delete(orgId);
+      return;
+    }
+    adPollers.set(orgId, setTimeout(tick, 20_000));
+  };
+  tick();
+}
+
 async function refreshMyOrgs() {
   const list = $("#orgs-list");
   if (!state.user) {
@@ -829,6 +925,14 @@ async function refreshMyOrgs() {
       textContent: "Open (SSO)",
       onclick: () => { window.location.href = target; },
     });
+
+    // Optional TaskVantage AD: live status chip + (when ready) the
+    // finish-the-import checklist. Polls its own endpoint until terminal.
+    if (org.ad && org.ad.enabled) {
+      const adBox = el("div", { className: "org-ad" });
+      info.appendChild(adBox);
+      watchAdStatus(org.id, adBox);
+    }
 
     list.appendChild(el("div", { className: "org" }, [info, openBtn]));
   }

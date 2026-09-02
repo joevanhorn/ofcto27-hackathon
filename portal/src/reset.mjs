@@ -12,12 +12,13 @@
 // portal/scripts/reset-pool.mjs (CLI). Tokens are only ever sent in
 // Authorization headers — never passed to onLine.
 
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { sswsHeader } from "./config.mjs";
-import { subdomainOf } from "./provision.mjs";
+import { baseUrlOf, subdomainOf, TERRAFORM_DIR } from "./provision.mjs";
+import { destroySpokeAd } from "./directory.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = path.resolve(__dirname, "..", "terraform", "state");
@@ -166,6 +167,47 @@ export async function resetSpoke(spoke, hub, onLine = () => {}) {
       await hubApi("POST", `/api/v1/apps/${a.id}/lifecycle/deactivate`);
       const del = await hubApi("DELETE", `/api/v1/apps/${a.id}`);
       if (del.ok || del.status === 204) { removed++; onLine(`  hub: deleted '${a.label}'`); }
+    }
+  }
+
+  // 6.5. Optional TaskVantage AD: destroy the DC + its SSM/IAM footprint
+  // BEFORE removing the state file — otherwise the Windows EC2 leaks and keeps
+  // billing. Tag-sweep runs regardless, so a corrupt state can't strand one.
+  {
+    const stateFile = path.join(STATE_DIR, `${sub}.tfstate`);
+    let stateHasAdModule = false;
+    let stateExists = false;
+    try {
+      const raw = readFileSync(stateFile, "utf8");
+      stateExists = true;
+      stateHasAdModule = raw.includes('"module.active_directory');
+    } catch { /* no state */ }
+    // Sweep when state records the AD module, or when there is NO state at all
+    // (a wiped state could be hiding a leaked DC). State without the module
+    // means terraform is sure this spoke never had one — skip the AWS calls.
+    if (stateHasAdModule || !stateExists) {
+      await destroySpokeAd({
+        sub,
+        terraformDir: TERRAFORM_DIR,
+        stateFile,
+        stateHasAdModule,
+        // The root's okta providers must initialize even for an AWS-only
+        // destroy target; tokens flow env-only, exactly as in provision.mjs.
+        env: {
+          TF_IN_AUTOMATION: "1",
+          TF_VAR_spoke_org_name: sub,
+          TF_VAR_spoke_base_url: baseUrlOf(spoke),
+          TF_VAR_spoke_api_token: String(spoke.token || "").replace(/^SSWS[ _]/i, ""),
+          ...(hub && hub.token
+            ? {
+                TF_VAR_hub_org_name: hub.domain.split(".")[0],
+                TF_VAR_hub_base_url: hub.domain.split(".").slice(1).join("."),
+                TF_VAR_hub_api_token: String(hub.token).replace(/^SSWS[ _]/i, ""),
+              }
+            : {}),
+        },
+        onLine,
+      });
     }
   }
 

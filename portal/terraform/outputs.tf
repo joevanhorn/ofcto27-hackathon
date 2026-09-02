@@ -32,10 +32,41 @@ output "applied_summary" {
     length(okta_realm.template) > 0
       ? [for r in okta_realm.template : "Created realm '${r.name}' (${r.realm_type})"]
       : (length(var.realm_names) > 0 ? ["Realms skipped — feature not available on this org"] : []),
+    try(module.active_directory[0].summary, []),
     [
       "Template '${var.template_id}' baseline applied",
     ]
   )
+}
+
+# -----------------------------------------------------------------------------
+# Active Directory re-exports (consumed by src/directory.mjs). try() keeps
+# non-AD applies from erroring when the module instance has count = 0.
+# -----------------------------------------------------------------------------
+
+output "ad_instance_id" {
+  description = "EC2 instance ID of the spoke's TaskVantage DC"
+  value       = try(module.active_directory[0].instance_id, "")
+}
+
+output "ad_computer_name" {
+  description = "NetBIOS computer name of the DC"
+  value       = try(module.active_directory[0].computer_name, "")
+}
+
+output "ad_status_parameter" {
+  description = "SSM parameter carrying the DC's setup phase"
+  value       = try(module.active_directory[0].status_parameter, "")
+}
+
+output "ad_password_parameter" {
+  description = "SSM SecureString parameter holding the DC Administrator password"
+  value       = try(module.active_directory[0].password_parameter, "")
+}
+
+output "ad_private_ip" {
+  description = "Private IP of the DC inside the shared AD VPC"
+  value       = try(module.active_directory[0].private_ip, "")
 }
 
 output "deployed_app_ids" {

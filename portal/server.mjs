@@ -25,6 +25,13 @@ import {
 } from "./src/config.mjs";
 import { provisionSpoke, subdomainOf, TERRAFORM_DIR } from "./src/provision.mjs";
 import { createCertificationCampaign } from "./src/governance.mjs";
+import {
+  computerNameFor,
+  describePhase,
+  generateAdPassword,
+  revealAdPassword,
+  startDirectoryWatch,
+} from "./src/directory.mjs";
 import { chatApiKey, runChat } from "./src/chat.mjs";
 import { resetPool } from "./src/reset.mjs";
 
@@ -160,6 +167,13 @@ function buildPlan(org, template, user, resolved) {
     }
     if (resolved.campaign) {
       steps.push(`Schedule a ${resolved.campaign.cadence} access certification campaign ("${resolved.campaign.name}")`);
+    }
+    if (resolved.activeDirectory) {
+      steps.push(
+        "Launch a TaskVantage AD domain controller (taskvantage.local) in the shared AD VPC",
+        "Build the enterprise directory: tv* schema attributes, 242 OUs, groups, sample users",
+        "Stage the Okta AD agent for Universal Directory import into this org"
+      );
     }
   }
   steps.push(
@@ -326,6 +340,13 @@ export function createServer() {
       if (orgs.length) console.log(`[orgs] restored ${orgs.length} org record(s)`);
     } catch {
       /* no file yet */
+    }
+    // Resume AD watchers interrupted by a restart: any org still "building"
+    // gets its poll loop back so it eventually lands on ready/error/timeout.
+    for (const rec of orgs) {
+      if (rec.ad && rec.ad.enabled && rec.ad.status === "building") {
+        startDirectoryWatch({ org: rec, saveOrgs });
+      }
     }
   }
 
@@ -709,6 +730,31 @@ export function createServer() {
               );
             }
 
+            // Optional TaskVantage AD: credentials are generated once per
+            // request. If the spoke already has AD SSM params (re-provision of
+            // a live DC), REUSE them — rotating the param would desync it from
+            // the actual Windows Administrator password.
+            let adVars = null;
+            if (resolved.activeDirectory) {
+              const [existingAdmin, existingSafe] = await Promise.all([
+                revealAdPassword(`/taskvantage/${spoke.subdomain}/admin-password`),
+                revealAdPassword(`/taskvantage/${spoke.subdomain}/safe-mode-password`),
+              ]);
+              const creds = loadCreds();
+              adVars = {
+                enable_active_directory: true,
+                ad_computer_name: computerNameFor(spoke.subdomain),
+                ad_admin_password: existingAdmin || generateAdPassword(),
+                ad_safe_mode_password: existingSafe || generateAdPassword(),
+                ad_s3_bucket: creds.AD_S3_BUCKET || "",
+                ad_s3_prefix: creds.AD_S3_PREFIX || "",
+                ad_aws_region: creds.AD_AWS_REGION || "",
+              };
+              job.lines.push(
+                ">> active directory: launching TaskVantage domain controller alongside the baseline"
+              );
+            }
+
             const r = await provisionSpoke({
               spoke,
               hub: REAL.hub, // hub creds always (provider init); federation gated:
@@ -720,6 +766,7 @@ export function createServer() {
                 deploy_apps: resolved.apps,
                 realm_names: resolved.realms,
                 enable_realms: realmsOk,
+                ...(adVars || {}),
               },
               onLine: (line) => job.lines.push(line),
             });
@@ -758,8 +805,42 @@ export function createServer() {
                 hub_app_id: outputs.hub_app_id || null,
                 campaign,
               };
+              // AD builds itself asynchronously after the apply — record it as
+              // "building" and let the background watcher carry the long tail;
+              // the org card polls /api/orgs/:id/ad for live status.
+              if (adVars && outputs.ad_instance_id) {
+                orgRecord.ad = {
+                  enabled: true,
+                  status: "building",
+                  phase: "LAUNCHING",
+                  instanceId: outputs.ad_instance_id,
+                  computerName: outputs.ad_computer_name || adVars.ad_computer_name,
+                  domain: "taskvantage.local",
+                  statusParam: outputs.ad_status_parameter,
+                  passwordParam: outputs.ad_password_parameter,
+                  log: [],
+                  updatedAt: new Date().toISOString(),
+                };
+                job.lines.push(
+                  `>> active directory: DC launched (${outputs.ad_instance_id}) — ` +
+                    "directory builds in the background (~20 min); track it on the org card"
+                );
+              } else if (adVars) {
+                job.lines.push(
+                  ">> active directory: WARNING — apply returned no DC instance id"
+                );
+              }
               orgs.push(orgRecord);
               saveOrgs();
+              if (orgRecord.ad) {
+                startDirectoryWatch({
+                  org: orgRecord,
+                  saveOrgs,
+                  onLine: (line) => {
+                    if (!job.done) job.lines.push(line);
+                  },
+                });
+              }
               job.result = { org: orgRecord, plan };
             } else {
               job.result = { error: "provisioning failed", code: r.code };
@@ -791,6 +872,19 @@ export function createServer() {
         org.resolved = resolveTemplate(template, org.options);
         org.federation = "federated";
         org.createdAt = new Date().toISOString();
+        // Sim AD: same org-card experience, driven by elapsed time (see the
+        // /api/orgs/:id/ad handler) — deterministic and stage-safe.
+        if (org.resolved.activeDirectory) {
+          org.ad = {
+            enabled: true,
+            status: "building",
+            phase: "LAUNCHING",
+            sim: true,
+            computerName: computerNameFor(org.id),
+            domain: "taskvantage.local",
+            simStartedAt: Date.now(),
+          };
+        }
 
         const plan = buildPlan(org, template, user, org.resolved);
         return sendJson(res, 200, { org, plan });
@@ -854,6 +948,68 @@ export function createServer() {
         // Real mode lists the terraform-provisioned orgs; sim lists the pool.
         const source = IS_REAL ? orgs : pool;
         return sendJson(res, 200, { orgs: listMyOrgs(source, user.id) });
+      }
+
+      // --- Active Directory status + password reveal ---------------------
+      // GET  /api/orgs/:id/ad          -> { status, phase, message, ... }
+      // POST /api/orgs/:id/ad/password -> { password } (owner-gated, real only)
+      {
+        const adMatch = pathname.match(/^\/api\/orgs\/([^/]+)\/ad(\/password)?$/);
+        if (adMatch) {
+          const user = currentUser(req);
+          if (!user) return sendJson(res, 401, { error: "not authenticated" });
+          const orgId = decodeURIComponent(adMatch[1]);
+          const source = IS_REAL ? orgs : pool;
+          const org = source.find((o) => o.id === orgId);
+          if (!org || !org.ad || !org.ad.enabled) {
+            return sendJson(res, 404, { error: "no active directory on this org" });
+          }
+
+          if (adMatch[2] && method === "POST") {
+            if (org.ownerId !== user.id) {
+              return sendJson(res, 403, { error: "not the org owner" });
+            }
+            if (org.ad.sim) {
+              return sendJson(res, 200, { password: "SimMode-NoRealPassword" });
+            }
+            const password = await revealAdPassword(org.ad.passwordParam);
+            if (!password) return sendJson(res, 502, { error: "could not read password" });
+            return sendJson(res, 200, { password }); // never logged server-side
+          }
+
+          if (!adMatch[2] && method === "GET") {
+            // Sim mode scripts the phase sequence off elapsed time so the org
+            // card shows the same experience without any AWS calls.
+            if (org.ad.sim) {
+              const SIM_PHASES = [
+                ["LAUNCHING", 0],
+                ["ADDS_INSTALLED", 15_000],
+                ["PROMOTION_STARTED", 30_000],
+                ["SCHEMA_APPLIED", 50_000],
+                ["USERS_CREATED", 65_000],
+                ["OUS_CREATED", 80_000],
+                ["AGENT_STAGED", 90_000],
+                ["READY", 100_000],
+              ];
+              const elapsed = Date.now() - (org.ad.simStartedAt || 0);
+              let phase = "LAUNCHING";
+              for (const [p, at] of SIM_PHASES) if (elapsed >= at) phase = p;
+              org.ad.phase = phase;
+              org.ad.status = phase === "READY" ? "ready" : "building";
+            }
+            return sendJson(res, 200, {
+              status: org.ad.status,
+              phase: org.ad.phase,
+              message: describePhase(org.ad.phase),
+              reason: org.ad.reason || null,
+              instanceId: org.ad.instanceId || null,
+              computerName: org.ad.computerName,
+              domain: org.ad.domain,
+              log: org.ad.log || [],
+              updatedAt: org.ad.updatedAt || null,
+            });
+          }
+        }
       }
 
       // --- Simulated hub SSO (the hero moment) ---------------------------

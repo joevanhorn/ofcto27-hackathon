@@ -129,3 +129,70 @@ variable "spoke_audience" {
   type        = string
   default     = ""
 }
+
+# ------------------------------------------------------------------------------
+# Optional TaskVantage Active Directory (see active-directory.tf). All defaulted
+# so existing non-AD applies are completely unaffected.
+# ------------------------------------------------------------------------------
+
+variable "enable_active_directory" {
+  description = "Launch a TaskVantage AD domain controller for this spoke"
+  type        = bool
+  default     = false
+}
+
+variable "aws_region" {
+  description = "AWS region hosting the shared AD network + DCs"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "ad_computer_name" {
+  description = "Unique NetBIOS computer name for this spoke's DC (<=15 chars)"
+  type        = string
+  default     = ""
+}
+
+variable "ad_domain_name" {
+  description = "AD DNS domain name"
+  type        = string
+  default     = "taskvantage.local"
+}
+
+variable "ad_netbios_name" {
+  description = "AD NetBIOS domain name"
+  type        = string
+  default     = "TASKVANTAGE"
+}
+
+variable "ad_admin_password" {
+  description = "Local/domain Administrator password (generated per request by the portal)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "ad_safe_mode_password" {
+  description = "DSRM safe-mode password (generated per request by the portal)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "ad_s3_bucket" {
+  description = "S3 bucket holding the staged DC setup artifacts"
+  type        = string
+  default     = "okta-terraform-demo"
+}
+
+variable "ad_s3_prefix" {
+  description = "S3 key prefix for the staged DC setup artifacts"
+  type        = string
+  default     = "ad/taskvantage"
+}
+
+variable "ad_network_tag" {
+  description = "Name tag of the shared AD network (see terraform/ad-network)"
+  type        = string
+  default     = "taskvantage-ad"
+}

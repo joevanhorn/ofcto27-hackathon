@@ -6,6 +6,21 @@ provider "okta" {
   api_token = var.spoke_api_token
 }
 
+# AWS provider for the optional per-spoke Active Directory DC (see
+# active-directory.tf). Authenticates via the host EC2 instance role — no keys.
+# Unused (no resources, no data sources evaluated) when
+# enable_active_directory=false, so non-AD applies never touch AWS.
+provider "aws" {
+  region = var.aws_region
+
+  default_tags {
+    tags = {
+      Project   = "velocity27-portal"
+      Component = "taskvantage-ad"
+    }
+  }
+}
+
 # Second, aliased provider for the HUB org. Real SAML Org2Org federation needs
 # resources created on BOTH sides in the SAME root apply: the hub's SAML app
 # (IdP side) and the spoke's external IdP (SP side). Cross-org values are carried
