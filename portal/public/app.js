@@ -856,25 +856,70 @@ function watchAdStatus(orgId, container) {
     const { status, body } = await jsonFetch(`/api/orgs/${encodeURIComponent(orgId)}/ad`);
     if (status !== 200 || !body) return;
     container.textContent = "";
+    const migrating = body.migration && body.migration.status === "running";
     const stateClass =
-      body.status === "ready" ? "fed-badge" : "org-meta";
+      body.status === "ready" || body.status === "migrated" ? "fed-badge" : "org-meta";
     container.appendChild(
       el("div", { className: "org-meta" }, [
-        el("span", { className: stateClass, textContent: `AD: ${body.status}` }),
+        el("span", {
+          className: stateClass,
+          textContent: `AD: ${migrating ? "migrating…" : body.status}`,
+        }),
         "  ",
         body.message || "",
       ])
     );
-    if (body.status === "ready") {
-      container.appendChild(adChecklist(orgId, body));
+
+    // Live migration log (phases 3+4 of docs/ad-to-okta-journey.md).
+    if (body.migration && (body.migration.log || []).length) {
+      const pre = el("pre", { className: "org-meta" });
+      pre.textContent = body.migration.log.slice(-8).join("\n");
+      container.appendChild(pre);
+    }
+
+    if (body.status === "migrated") {
+      container.appendChild(
+        el("div", {
+          className: "org-meta",
+          textContent:
+            "This org is fully Okta-managed. AD is load-bearing nothing — disconnect (or pool-reset) at your leisure.",
+        })
+      );
       adPollers.delete(orgId);
       return;
     }
+
+    if (body.status === "ready" && !migrating) {
+      container.appendChild(adChecklist(orgId, body));
+      const migrateBtn = el("button", {
+        className: "btn btn-primary",
+        textContent: "Migrate to Okta-managed",
+        onclick: async () => {
+          migrateBtn.disabled = true;
+          await jsonFetch(`/api/orgs/${encodeURIComponent(orgId)}/ad/migrate`, {
+            method: "POST",
+            body: "{}",
+          });
+          watchAdStatus(orgId, container); // resume live polling
+        },
+      });
+      container.appendChild(
+        el("div", { className: "org-meta" }, [
+          "Import finished? ",
+          migrateBtn,
+          " mirrors groups, creates attribute rules, flips users to Okta-sourced.",
+        ])
+      );
+      adPollers.delete(orgId);
+      return;
+    }
+
     if (body.status === "error" || body.status === "timeout") {
       adPollers.delete(orgId);
       return;
     }
-    adPollers.set(orgId, setTimeout(tick, 20_000));
+    // building, or migration running — keep polling (faster while migrating).
+    adPollers.set(orgId, setTimeout(tick, migrating ? 4_000 : 20_000));
   };
   tick();
 }

@@ -148,6 +148,31 @@ export function startDirectoryWatch({ org, saveOrgs, onLine = () => {} }) {
   setTimeout(tick, POLL_MS).unref?.();
 }
 
+// Sim-mode "Migrate to Okta-managed": the same beats the real engine
+// (src/migrate.mjs) streams, scripted off elapsed time so the demo is
+// deterministic and stage-safe. Pure function — unit-tested directly.
+const SIM_MIGRATION_SCRIPT = [
+  [0, ">> migrate: found AD integration 'Active Directory' (ACTIVE)"],
+  [2_000, ">> migrate: 20 AD-imported user(s), 14 AD-mastered group(s) to mirror"],
+  [5_000, ">> migrate: mirrored 'Site-Managers', 'Field-Technicians', 'Territory-Managers' + 11 more"],
+  [8_000, ">> migrate: no app assignments were riding AD groups — nothing to re-target"],
+  [11_000, '>> migrate: rule: tvOrgTerritoryID == "T-100" -> group \'Territory T-100\' (the OU tree is now policy)'],
+  [13_000, '>> migrate: rule: tvOrgTerritoryID == "T-200" -> group \'Territory T-200\''],
+  [16_000, ">> migrate: AD integration deactivated — profile sourcing falls through to Okta"],
+  [19_000, ">> migrate: password continuity: 20/20 users keep their password (Password Sync stand-in)"],
+  [22_000, ">> migrate: verified: 20/20 users now Okta-sourced"],
+  [24_000, ">> migrate: complete — 14 groups mirrored, 2 attribute rule(s), 20/20 users Okta-sourced. AD is now load-bearing nothing."],
+];
+const SIM_MIGRATION_DONE_MS = 24_000;
+
+export function simMigration(elapsedMs) {
+  const log = SIM_MIGRATION_SCRIPT.filter(([at]) => elapsedMs >= at).map(([, l]) => l);
+  return {
+    status: elapsedMs >= SIM_MIGRATION_DONE_MS ? "migrated" : "running",
+    log,
+  };
+}
+
 /**
  * Tear down a spoke's AD resources. Called by reset.mjs BEFORE it deletes the
  * per-spoke terraform state (otherwise the Windows EC2 would leak and keep

@@ -79,6 +79,19 @@ Okta-side directory integration has no terraform resource. When the org card sho
      existing spoke users — confirm as new).
 5. Run a **Full Import** and verify ~21 users and 14 groups arrive.
 
+## Migrating to Okta-managed
+
+Once the import is verified, the org card offers **Migrate to Okta-managed** — the
+automated phases 3+4 of [ad-to-okta-journey.md](ad-to-okta-journey.md): it mirrors every
+AD-mastered group to an Okta-native twin (member copies), re-targets any app assignments
+riding AD groups, creates attribute-driven groups + group rules from `tvOrgTerritoryID`
+(where mapped), deactivates the AD integration so profile sourcing falls through to
+Okta, then sets each migrated user's Okta password to the TaskVantage demo password (a
+stand-in for the AD Password Sync agent — "same password, now against Okta") and
+verifies users report Okta as their credential provider. Progress streams live on the
+org card. Everything it creates is marked (`[tv-migrated]` group descriptions, `tv-`
+rule prefix) so pool reset removes it, along with the imported users and the AD app.
+
 ## Repair / troubleshooting
 
 - `aws ssm get-parameter --name /taskvantage/<spoke>/setup-phase --query Parameter.Value --output text`

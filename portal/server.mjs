@@ -30,8 +30,10 @@ import {
   describePhase,
   generateAdPassword,
   revealAdPassword,
+  simMigration,
   startDirectoryWatch,
 } from "./src/directory.mjs";
+import { runAdMigration } from "./src/migrate.mjs";
 import { chatApiKey, runChat } from "./src/chat.mjs";
 import { resetPool } from "./src/reset.mjs";
 
@@ -950,11 +952,12 @@ export function createServer() {
         return sendJson(res, 200, { orgs: listMyOrgs(source, user.id) });
       }
 
-      // --- Active Directory status + password reveal ---------------------
-      // GET  /api/orgs/:id/ad          -> { status, phase, message, ... }
+      // --- Active Directory status, password reveal, migration -----------
+      // GET  /api/orgs/:id/ad          -> { status, phase, message, migration, ... }
       // POST /api/orgs/:id/ad/password -> { password } (owner-gated, real only)
+      // POST /api/orgs/:id/ad/migrate  -> kicks off "Migrate to Okta-managed"
       {
-        const adMatch = pathname.match(/^\/api\/orgs\/([^/]+)\/ad(\/password)?$/);
+        const adMatch = pathname.match(/^\/api\/orgs\/([^/]+)\/ad(\/password|\/migrate)?$/);
         if (adMatch) {
           const user = currentUser(req);
           if (!user) return sendJson(res, 401, { error: "not authenticated" });
@@ -965,7 +968,7 @@ export function createServer() {
             return sendJson(res, 404, { error: "no active directory on this org" });
           }
 
-          if (adMatch[2] && method === "POST") {
+          if (adMatch[2] === "/password" && method === "POST") {
             if (org.ownerId !== user.id) {
               return sendJson(res, 403, { error: "not the org owner" });
             }
@@ -977,10 +980,56 @@ export function createServer() {
             return sendJson(res, 200, { password }); // never logged server-side
           }
 
+          // Migrate to Okta-managed (journey phases 3+4, src/migrate.mjs).
+          if (adMatch[2] === "/migrate" && method === "POST") {
+            if (org.ownerId !== user.id) {
+              return sendJson(res, 403, { error: "not the org owner" });
+            }
+            if (org.ad.migration && org.ad.migration.status === "running") {
+              return sendJson(res, 409, { error: "migration already running" });
+            }
+            if (org.ad.sim) {
+              org.ad.migration = { sim: true, status: "running", simStartedAt: Date.now() };
+              return sendJson(res, 202, { status: "running" });
+            }
+            const spoke = (REAL.spokes || []).find((s) => s.subdomain === org.id);
+            if (!spoke || !spoke.token) {
+              return sendJson(res, 502, { error: "no credentials for this spoke" });
+            }
+            const migration = { status: "running", log: [], startedAt: new Date().toISOString() };
+            org.ad.migration = migration;
+            saveOrgs();
+            (async () => {
+              // Same password the DC uses — "your password keeps working" is
+              // the Password Sync stand-in. Read from SSM, never logged.
+              const demoPassword = await revealAdPassword(org.ad.passwordParam);
+              const r = await runAdMigration({
+                domain: spoke.domain,
+                token: spoke.token,
+                demoPassword,
+                onLine: (line) => {
+                  migration.log = [...migration.log, line].slice(-100);
+                  saveOrgs();
+                },
+              });
+              migration.status = r.status;
+              if (r.summary) migration.summary = r.summary;
+              if (r.reason) migration.reason = r.reason;
+              migration.finishedAt = new Date().toISOString();
+              if (r.status === "migrated") org.ad.status = "migrated";
+              saveOrgs();
+            })().catch((e) => {
+              migration.status = "error";
+              migration.reason = String(e && e.message);
+              saveOrgs();
+            });
+            return sendJson(res, 202, { status: "running" });
+          }
+
           if (!adMatch[2] && method === "GET") {
             // Sim mode scripts the phase sequence off elapsed time so the org
             // card shows the same experience without any AWS calls.
-            if (org.ad.sim) {
+            if (org.ad.sim && org.ad.status !== "migrated") {
               const SIM_PHASES = [
                 ["LAUNCHING", 0],
                 ["ADDS_INSTALLED", 15_000],
@@ -997,15 +1046,33 @@ export function createServer() {
               org.ad.phase = phase;
               org.ad.status = phase === "READY" ? "ready" : "building";
             }
+            // Sim migration: replay the scripted beats off elapsed time.
+            if (org.ad.migration && org.ad.migration.sim) {
+              const m = simMigration(Date.now() - (org.ad.migration.simStartedAt || 0));
+              org.ad.migration.status = m.status;
+              org.ad.migration.log = m.log;
+              if (m.status === "migrated") org.ad.status = "migrated";
+            }
             return sendJson(res, 200, {
               status: org.ad.status,
               phase: org.ad.phase,
-              message: describePhase(org.ad.phase),
+              message:
+                org.ad.status === "migrated"
+                  ? "migrated to Okta-managed — AD can be disconnected at your leisure"
+                  : describePhase(org.ad.phase),
               reason: org.ad.reason || null,
               instanceId: org.ad.instanceId || null,
               computerName: org.ad.computerName,
               domain: org.ad.domain,
               log: org.ad.log || [],
+              migration: org.ad.migration
+                ? {
+                    status: org.ad.migration.status,
+                    log: (org.ad.migration.log || []).slice(-15),
+                    summary: org.ad.migration.summary || null,
+                    reason: org.ad.migration.reason || null,
+                  }
+                : null,
               updatedAt: org.ad.updatedAt || null,
             });
           }

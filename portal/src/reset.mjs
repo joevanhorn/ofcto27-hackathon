@@ -156,6 +156,45 @@ export async function resetSpoke(spoke, hub, onLine = () => {}) {
     }
   }
 
+  // 5.7. TaskVantage AD artifacts (docs/ad-to-okta-journey.md phases 1-4):
+  // migration-created group rules ("tv-" prefix) and groups ("[tv-migrated]"
+  // marker), imported @taskvantage.local users, and the AD integration app
+  // itself (deleting it also clears the frozen AD-mastered groups).
+  {
+    const rules = await api("GET", "/api/v1/groups/rules?limit=200");
+    for (const r of (rules.json && (Array.isArray(rules.json) ? rules.json : rules.json.rules)) || []) {
+      if (!/^tv-/.test(r.name || "")) continue;
+      if (r.status === "ACTIVE") await api("POST", `/api/v1/groups/rules/${r.id}/lifecycle/deactivate`);
+      const del = await api("DELETE", `/api/v1/groups/rules/${r.id}`);
+      if (del.ok || del.status === 204) { removed++; onLine(`  ad: deleted group rule '${r.name}'`); }
+    }
+
+    const tvGroups = await api("GET", "/api/v1/groups?limit=200");
+    for (const g of Array.isArray(tvGroups.json) ? tvGroups.json : []) {
+      if (g.type !== "OKTA_GROUP") continue;
+      if (!((g.profile && g.profile.description) || "").includes("[tv-migrated]")) continue;
+      const del = await api("DELETE", `/api/v1/groups/${g.id}`);
+      if (del.ok || del.status === 204) { removed++; onLine(`  ad: deleted migrated group '${g.profile.name}'`); }
+    }
+
+    const tvUsers = await api("GET", "/api/v1/users?limit=200");
+    for (const u of Array.isArray(tvUsers.json) ? tvUsers.json : []) {
+      const login = (u.profile && u.profile.login) || "";
+      if (!login.endsWith("@taskvantage.local")) continue;
+      await api("POST", `/api/v1/users/${u.id}/lifecycle/deactivate`);
+      const del = await api("DELETE", `/api/v1/users/${u.id}`);
+      if (del.ok || del.status === 204) { removed++; onLine(`  ad: deleted imported user '${login}'`); }
+    }
+
+    const allApps = await api("GET", "/api/v1/apps?limit=200");
+    for (const a of Array.isArray(allApps.json) ? allApps.json : []) {
+      if (a.name !== "active_directory") continue;
+      await api("POST", `/api/v1/apps/${a.id}/lifecycle/deactivate`);
+      const del = await api("DELETE", `/api/v1/apps/${a.id}`);
+      if (del.ok || del.status === 204) { removed++; onLine(`  ad: deleted AD integration '${a.label || a.name}'`); }
+    }
+  }
+
   // 6. Hub side: the federation SAML app that targets this spoke.
   if (hub && hub.token) {
     const hubApi = client(hub.domain, hub.token);
